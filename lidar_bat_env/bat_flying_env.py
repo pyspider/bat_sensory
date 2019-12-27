@@ -116,7 +116,7 @@ class BatFlyingEnv(gym.Env):
         bat_seg = Segment(bat_p0, bat_p1)
         for w in self.walls:
             c_p = cal_cross_point(bat_seg, w)
-            if is_point_in_segment(c_p, bat_seg) is True:
+            if is_point_in_segment(c_p, bat_seg) == True:
                 wall_angle = math.atan2(w.p1.y - w.p0.y, w.p1.x - w.p0.x)
                 self.bat.bump(bat_p0.x, bat_p0.y, wall_angle)
                 step_reward = -1.0
