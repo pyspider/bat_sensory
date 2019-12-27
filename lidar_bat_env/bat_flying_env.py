@@ -66,10 +66,11 @@ class BatFlyingEnv(gym.Env):
         self.discrete_length = discrete_length
         self.dt = 0.005  # [s]
 
-        p0 = Point(0, 0)
-        p1 = Point(0, world_height)
-        p2 = Point(world_width, world_height)
-        p3 = Point(world_width, 0)
+        margin = 0.1
+        p0 = Point(margin, margin)
+        p1 = Point(margin, world_height - margin)
+        p2 = Point(world_width - margin, world_height - margin)
+        p3 = Point(world_width - margin, margin)
         w0 = Segment(p0, p1)
         w1 = Segment(p1, p2)
         w2 = Segment(p2, p3)

@@ -78,11 +78,11 @@ class LidarBat(object):
             self.lidar_left_angle, self.lidar_right_angle])  # [rad]
 
     def emit_pulse(self, angle, obstacle_segments):
-        for clipped_segment in map(self._clip_segment_lidar_range, obstacle_segments):
-            if clipped_segment is None:
-                continue
-            clipped_segment.p0.x
-        # pass
+        # for clipped_segment in map(self._clip_segment_lidar_range, obstacle_segments):
+        #     if clipped_segment is None:
+        #         continue
+        #     clipped_segment.p0.x
+        pass
 
     def _angle_from_bat(self, x, y):
         return math.atan2(y - self.y, x - self.x) - self.angle
@@ -100,7 +100,7 @@ class LidarBat(object):
         right_angle = min(a0, a1)
         if (   left_angle  <= self.lidar_right_angle
             or right_angle >= self.lidar_left_angle
-            or left_angle - right_anlge >= math.pi / 2):
+            or left_angle - right_angle >= math.pi / 2):
             return None
         p_nose = Point(self.x, self.y)
         if left_angle > self.lidar_left_angle:
@@ -114,8 +114,8 @@ class LidarBat(object):
         p_nose = Point(self.x, self.y)
         p_lidar = Point(self.x + x, self.y + y)
         lidar_seg = Segment(p_nose, p_lidar)
-        c_p = cal_cross_point(s, lidar_seg)
-        if is_point_in_segment(c_p, s) is True:
+        c_p = cal_cross_point(segment, lidar_seg)
+        if is_point_in_segment(c_p, segment) is True:
             return c_p
         else:
             print('warnings: cross point is not in segment.')
