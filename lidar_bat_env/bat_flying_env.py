@@ -5,40 +5,10 @@ from gym import spaces, logger
 from gym.utils import seeding
 import numpy as np
 
-from .lidar_bat import LidarBat
+from .lidar_bat import *
+
 
 FPS = 60
-
-class Point(object):
-    def __init__(self, x, y):
-        self.x = x
-        self.y = y
-
-class Segment(object):
-    def __init__(self, p0: Point, p1: Point):
-        self.p0 = p0
-        self.p1 = p1
- 
-def cal_cross_point(s0: Segment, s1: Segment) -> Point:
-    x0, y0, x1, y1 = s0.p0.x, s0.p0.y, s0.p1.x, s0.p1.y
-    x2, y2, x3, y3 = s1.p0.x, s1.p0.y, s1.p1.x, s1.p1.y
-    den = (x3 - x2) * (y1 - y0) - (x1 - x0) * (y3 - y2)
-    if den == 0:
-        return Point(np.inf, np.inf)
-    
-    d1 = (y2 * x3 - x2 * y3)
-    d2 = (y0 * x1 - x0 * y1)
-
-    x = (d1 * (x1 - x0) - d2 * (x3 - x2)) / den
-    y = (d1 * (y1 - y0) - d2 * (y3 - y2)) / den
-    return Point(x, y)
-
-def is_point_in_segment(p: Point, s: Segment):
-    e = 1e-8
-    x_ok = min(s.p0.x, s.p1.x) - e <= p.x and p.x <= max(s.p0.x, s.p1.x) + e
-    y_ok = min(s.p0.y, s.p1.y) - e <= p.y and p.y <= max(s.p0.y, s.p1.y) + e
-    return x_ok and y_ok
-
 
 
 class BatFlyingEnv(gym.Env):
@@ -96,12 +66,15 @@ class BatFlyingEnv(gym.Env):
         self.discrete_length = discrete_length
         self.dt = 0.005  # [s]
 
-        walls = [
-            (0, 0, 0, world_height),  # x0, y0, x1, y1
-            (0, world_height, world_width, world_height),
-            (world_width, 0, world_width, world_height),
-            (0, 0, world_width, 0)
-        ]
+        p0 = Point(0, 0)
+        p1 = Point(0, world_height)
+        p2 = Point(world_width, world_height)
+        p3 = Point(world_width, 0)
+        w0 = Segment(p0, p1)
+        w1 = Segment(p1, p2)
+        w2 = Segment(p2, p3)
+        w3 = Segment(p3, p0)
+        walls = [w0, w1, w2, w3]
         self.walls = [] if walls is None else walls
 
         self.goal_area = () if goal_area is None else goal_area
@@ -126,7 +99,8 @@ class BatFlyingEnv(gym.Env):
             np.array([np.inf, 1]),
             dtype=np.float32)
         
-        self.bat = LidarBat(0, 0.3, 0.75, 3, self.dt) if bat is None else bat
+        self.default_bat = lambda: LidarBat(0, 0.3, 0.75, 3, self.dt)
+        self.bat = self.default_bat() if bat is None else bat
         self.viewer = None
         self.seed()
 
@@ -140,19 +114,21 @@ class BatFlyingEnv(gym.Env):
         bat_p1 = Point(self.bat.x, self.bat.y)
         bat_seg = Segment(bat_p0, bat_p1)
         for w in self.walls:
-            w_p0, w_p1 = Point(w[0], w[1]), Point(w[2], w[3])
-            wall_seg = Segment(w_p0, w_p1)
-            c_p = cal_cross_point(bat_seg, wall_seg)
-            if is_point_in_segment(c_p, bat_seg):
-                wall_angle = math.atan2(w_p1.y - w_p0.y, w_p1.x - w_p0.x)
+            c_p = cal_cross_point(bat_seg, w)
+            if is_point_in_segment(c_p, bat_seg) is True:
+                wall_angle = math.atan2(w.p1.y - w.p0.y, w.p1.x - w.p0.x)
                 self.bat.bump(bat_p0.x, bat_p0.y, wall_angle)
                 step_reward = -1.0
+
+        if action[2] >= 0.5:
+            self.bat.emit_pulse(action[3], self.walls)
+
         done = None
         step_reward = 0
         return np.array(self.bat.state), step_reward, done, {}
 
     def reset(self, bat=None):
-        self.bat = self.bat if bat is None else bat
+        self.bat = self.default_bat() if bat is None else bat
         self.reward = 0.0
         self.t = 0.0
         return np.array(self.bat.state)
@@ -182,7 +158,7 @@ class BatFlyingEnv(gym.Env):
 
             wall_width = 5
             for w in self.walls:
-                x0, y0, x1, y1 = np.array(w) * scale
+                x0, y0, x1, y1 = w.unpack() * scale
                 l, r = x0 - wall_width/2, x1 + wall_width/2, 
                 b, t = y0 - wall_width/2, y1 + wall_width/2
                 wall_geom = rendering.FilledPolygon(
