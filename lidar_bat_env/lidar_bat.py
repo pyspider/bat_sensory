@@ -6,10 +6,7 @@ class Point(object):
     def __init__(self, x, y):
         self.x = x
         self.y = y
-    
-    def length_to_point(self, x, y):
-        return np.linalg.norm([self.x - x, self.y - y])
-    
+
     def unpack(self):
         return np.array([self.x, self.y])
 
@@ -18,22 +15,22 @@ class Segment(object):
         self.p0 = p0
         self.p1 = p1
 
-    def nearest_point(self, x, y, e=1e-8):
-        length_to_p0 = self.p0.length_to_point(x, y)
-        length_to_p1 = self.p0.length_to_point(x, y)
-        if abs(length_to_p0 - length_to_p1) < e:
-            x = (min(self.p0.x, self.p1.x) - max(self.p0.x, self.p1.x))/2
-            y = (min(self.p0.y, self.p1.y) - max(self.p0.y, self.p1.y))/2
-            return Point(x, y)
-        if length_to_p0 < length_to_p1:
-            return self.p0
-        return self.p1
+    # def nearest_point(self, x, y, e=1e-8) -> Point:
+    #     length_to_p0 = self.p0.length_to_point(x, y)
+    #     length_to_p1 = self.p0.length_to_point(x, y)
+    #     if abs(length_to_p0 - length_to_p1) < e:
+    #         x = (min(self.p0.x, self.p1.x) - max(self.p0.x, self.p1.x))/2
+    #         y = (min(self.p0.y, self.p1.y) - max(self.p0.y, self.p1.y))/2
+    #         return Point(x, y)
+    #     if length_to_p0 < length_to_p1:
+    #         return self.p0
+    #     return self.p1
 
     def unpack(self):
         return np.array([self.p0.x, self.p0.y, self.p1.x, self.p1.y])
- 
 
-def cos_sin(theta):
+
+def cos_sin(theta) -> np.ndarray:
     return np.array([math.cos(theta), math.sin(theta)])
 
 def cal_cross_point(s0: Segment, s1: Segment) -> Point:
@@ -50,12 +47,34 @@ def cal_cross_point(s0: Segment, s1: Segment) -> Point:
     y = (d1 * (y1 - y0) - d2 * (y3 - y2)) / den
     return Point(x, y)
 
-def is_point_in_segment(p: Point, s: Segment):
+def rotate_vector(v, angle):
+    return v @ np.array(
+        [[ np.cos(angle), -np.sin(angle)], 
+         [np.sin(angle), np.cos(angle)]])
+
+def is_point_in_segment(p: Point, s: Segment) -> bool:
     e = 1e-8  # e is small number, for excuse 
     x_ok = min(s.p0.x, s.p1.x) - e <= p.x and p.x <= max(s.p0.x, s.p1.x) + e
     y_ok = min(s.p0.y, s.p1.y) - e <= p.y and p.y <= max(s.p0.y, s.p1.y) + e
     return x_ok and y_ok
 
+def convert2vec(v):
+    if type(v) == Point:
+        v = v.unpack()
+    if type(v) == Segment:
+        v = v.p1.unpack() - v.p0.unpack()
+    return v
+
+def cos_similarity(v0, v1):
+    v0 = convert2vec(v0)
+    v1 = convert2vec(v1)
+    return np.inner(v0, v1) / (np.linalg.norm(v0) * np.linalg.norm(v1))
+
+def rotation_direction(p0: Point, p1: Point):
+    v0 = p0.unpack()
+    v1 = p1.unpack()
+    outer = v0[0] * v1[1] - v1[0] * v0[1]
+    return 1 if outer >= 0 else -1
 
 class LidarBat(object):
     def __init__(self, init_angle, init_x, init_y, init_speed, dt):
@@ -69,59 +88,105 @@ class LidarBat(object):
         self.size = 7e-2  # [m]
 
         self.n_memory = 5  # number of states
-        self.state = np.zeros((self.n_memory, 2))
+        self.state = np.array([[np.inf, 0] for i in range(self.n_memory)])
 
         self.lidar_length = 20
-        self.lidar_left_angle = math.pi / 4
-        self.lidar_right_angle = -math.pi / 4
+        self.lidar_left_angle = math.pi / 10
+        self.lidar_right_angle = -math.pi / 10
         self.lidar_range = np.array([
             self.lidar_left_angle, self.lidar_right_angle])  # [rad]
-
-    def emit_pulse(self, angle, obstacle_segments):
-        # for clipped_segment in map(self._clip_segment_lidar_range, obstacle_segments):
-        #     if clipped_segment is None:
-        #         continue
-        #     clipped_segment.p0.x
-        pass
-
-    def _angle_from_bat(self, x, y):
-        return math.atan2(y - self.y, x - self.x) - self.angle
-
-    def _clip_segment_lidar_range(self, s: Segment) -> Segment:
-        a0 = self._angle_from_bat(s.p0.y, s.p0.x) 
-        a1 = self._angle_from_bat(s.p1.y, s.p1.x)
-        if a0 > a1:
-            left_angle, right_angle = a0, a1
-            left_point, right_point = s.p0, s.p1
-        else:
-            left_angle, right_angle = a1, a0
-            left_point, right_point = s.p1, s.p0
-        left_angle = max(a0, a1)
-        right_angle = min(a0, a1)
-        if (   left_angle  <= self.lidar_right_angle
-            or right_angle >= self.lidar_left_angle
-            or left_angle - right_angle >= math.pi / 2):
-            return None
-        p_nose = Point(self.x, self.y)
-        if left_angle > self.lidar_left_angle:
-            left_point = self._cross_point_lidar_and_segment(left_angle, s)
-        if right_angle < self.lidar_right_angle:
-            right_point = self._cross_point_lidar_and_segment(right_angle, s)
-        return Segment(left_point, right_point)
+        self.lidar_center_angle = self.angle
     
-    def _cross_point_lidar_and_segment(self, lidar_angle, segment) -> Point:
-        x, y = self.lidar_length * cos_sin(lidar_angle)
-        p_nose = Point(self.x, self.y)
-        p_lidar = Point(self.x + x, self.y + y)
-        lidar_seg = Segment(p_nose, p_lidar)
-        c_p = cal_cross_point(segment, lidar_seg)
-        if is_point_in_segment(c_p, segment) is True:
-            return c_p
-        else:
-            print('warnings: cross point is not in segment.')
 
-    def _cal_angle(self):
-        self.angle = math.atan2(self.v_y, self.v_x)
+    def emit_pulse(self, lidar_angle, obstacle_segments):
+        # relative angle to absolute angle
+        # left_lidar_angle, right_lidar_angle = self.angle + lidar_angle + self.lidar_range
+        # left_lidar_seg = self._lidar_segment(left_lidar_angle)
+        # right_lidar_seg = self._lidar_segment(right_lidar_angle)
+        left_lidar_seg, right_lidar_seg = self._lidar_segments(lidar_angle)
+        left_lidar_vec = left_lidar_seg.p1.unpack() - left_lidar_seg.p0.unpack()
+        right_lidar_vec = right_lidar_seg.p1.unpack() - right_lidar_seg.p0.unpack()
+        cs0 = cos_similarity(left_lidar_vec, right_lidar_vec)
+
+        detected_points = []
+        for s in obstacle_segments:
+            edge_vec0 = np.array([s.p0.x - self.x, s.p0.y - self.y])
+            edge_vec1 = np.array([s.p1.x - self.x, s.p1.y - self.y])
+
+            cs1 = cos_similarity(edge_vec0, left_lidar_vec)
+            cs2 = cos_similarity(edge_vec0, right_lidar_vec)
+            cs3 = cos_similarity(edge_vec1, left_lidar_vec)
+            cs4 = cos_similarity(edge_vec1, right_lidar_vec)
+
+            left_c_p  = cal_cross_point(left_lidar_seg, s)
+            right_c_p = cal_cross_point(right_lidar_seg, s)
+            is_left_cross  = (is_point_in_segment(left_c_p, s) and 
+                              is_point_in_segment(left_c_p, left_lidar_seg))
+            is_right_cross = (is_point_in_segment(right_c_p, s) and 
+                              is_point_in_segment(right_c_p, right_lidar_seg))
+
+            new_seg = None
+            if is_left_cross and is_right_cross:
+                new_seg = Segment(left_c_p, right_c_p)
+            elif is_left_cross:
+                if cs1 < cs0 and cs2 < cs0:
+                    new_seg = Segment(left_c_p, s.p0)
+                if cs3 < cs0 and cs4 < cs0:
+                    new_seg = Segment(left_c_p, s.p1)
+            elif is_right_cross:
+                if cs1 < cs0 and cs2 < cs0:
+                    new_seg = Segment(s.p0, right_c_p)
+                if cs3 < cs0 and cs4 < cs0:
+                    new_seg = Segment(s.p1, right_c_p)
+            else:
+                if cs1 < cs0 and cs2 < cs0 and cs3 < cs0 and cs4 < cs0:
+                    new_seg = s
+            if new_seg is not None:
+                detected_points.append(new_seg.p0)
+                detected_points.append(new_seg.p1)
+        
+        min_length = np.inf
+        nearest_point = None
+        for p in detected_points:
+            detected_length = np.linalg.norm([p.y - self.y, p.x - self.x])
+            if min_length > detected_length:
+                min_length = detected_length
+                nearest_point = p
+        
+        if nearest_point is None:
+            observation = np.array([np.inf, 0])
+        else:
+            detected_vec = Point(nearest_point.x - self.x, nearest_point.y - self.y)
+            bat_vec = Point(self.x, self.y)
+            angle_sign = rotation_direction(bat_vec, detected_vec)
+            detected_angle = angle_sign * math.acos(cos_similarity(bat_vec, detected_vec))
+            observation = np.array([min_length, detected_angle])
+            observation = nearest_point.unpack()
+        self._update_state(observation)
+        return observation
+        # pass
+
+    def _lidar_segments(self, lidar_angle):
+        v_left  = self.lidar_length * cos_sin(self.lidar_left_angle)
+        v_right = self.lidar_length * cos_sin(self.lidar_right_angle)
+        r = lambda v: rotate_vector(rotate_vector(v, self.angle), lidar_angle)
+        v_left  = rotate_vector(r(v_left),  self.lidar_left_angle)
+        v_right = rotate_vector(r(v_right), self.lidar_right_angle)
+        bat_position = np.array([self.x, self.y])
+        v_left, v_right = v_left + bat_position, v_right + bat_position
+        bat_p = Point(self.x, self.y)
+        left_p = Point(v_left[0], v_left[0])
+        right_p = Point(v_right[0], v_right[0])
+        return Segment(bat_p, left_p), Segment(bat_p, right_p)
+
+    def _lidar_segment(self, angle) -> Segment: 
+        x, y = self.lidar_length * cos_sin(angle)
+        return Segment(Point(self.x, self.y), Point(x + self.x, y + self.y))
+
+    def _update_state(self, new_observation):
+        self.state[1:] = self.state[:-1]
+        self.state[0] = new_observation
+
 
     def move(self, acceleration, angle):
         # a_x = acceleration * math.cos(self.angle + angle) 
@@ -147,3 +212,7 @@ class LidarBat(object):
         self.x = x0 + self.v_x * self.dt
         self.y = y0 + self.v_y * self.dt
         self._cal_angle()
+
+    def _cal_angle(self):
+        self.angle = math.atan2(self.v_y, self.v_x)
+        self.lidar_center_angle = self.angle

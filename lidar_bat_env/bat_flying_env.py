@@ -60,7 +60,8 @@ class BatFlyingEnv(gym.Env):
             walls=None,
             goal_area=None,
             accel_thresh=None,
-            angle_thresh_radians=None):
+            accel_angle_thresh=None,
+            pulse_angle_thresh=None):
         self.world_width = world_width
         self.world_height = world_height
         self.discrete_length = discrete_length
@@ -78,21 +79,22 @@ class BatFlyingEnv(gym.Env):
         walls = [w0, w1, w2, w3]
         self.walls = [] if walls is None else walls
 
-        self.goal_area = () if goal_area is None else goal_area
+        # self.goal_area = () if goal_area is None else goal_area
         self.accel_thresh = 50  # [m/s^2]
-        self.angle_thresh_radians = math.pi / 2 # [rad]
+        self.accel_angle_thresh = math.pi / 2 # [rad]
+        self.pulse_angle_thresh = math.pi / 4 # [rad]
 
         self.action_space = spaces.Box(
             np.array([
                 -self.accel_thresh,
-                -self.angle_thresh_radians,
+                -self.accel_angle_thresh,
                 0,
-                -self.angle_thresh_radians]),
+                -self.pulse_angle_thresh]),
             np.array([
                 self.accel_thresh,
-                self.angle_thresh_radians,
+                self.accel_angle_thresh,
                 1,
-                self.angle_thresh_radians]),
+                self.pulse_angle_thresh]),
             dtype=np.float32)
         
         self.observation_space = spaces.Box(
@@ -139,8 +141,8 @@ class BatFlyingEnv(gym.Env):
         screen_height = int(aspect_ratio * screen_width)
         scale = screen_width / self.world_width
 
+        from gym.envs.classic_control import rendering
         if self.viewer is None:
-            from gym.envs.classic_control import rendering
             self.viewer = rendering.Viewer(screen_width, screen_height)
             r = (self.bat.size * scale) / 2
             wing = 4 * math.pi / 5 # angle [rad]
@@ -157,7 +159,7 @@ class BatFlyingEnv(gym.Env):
             self.viewer.add_geom(bat_geom)
             self._bat_geom = bat_geom
 
-            wall_width = 5
+            wall_width = 5  # pixel
             for w in self.walls:
                 x0, y0, x1, y1 = w.unpack() * scale
                 l, r = x0 - wall_width/2, x1 + wall_width/2, 
@@ -171,6 +173,18 @@ class BatFlyingEnv(gym.Env):
         self.battrans.set_translation(
             self.bat.x * scale, self.bat.y * scale)
         self.battrans.set_rotation(self.bat.angle)
+
+        if self.bat.state[0][0] != np.inf: 
+            # angle, length = self.bat.state[0]
+            # x, y = length * cos_sin(angle) + np.array([self.bat.x, self.bat.y])
+            x, y = self.bat.state[0]
+            radius = 5  # pixel
+            echo_source = rendering.make_circle(radius)
+            echo_source.set_color(0.8, 0.5, 0)
+            echotrans = rendering.Transform()
+            echo_source.add_attr(echotrans)
+            echotrans.set_translation(scale*x, scale*y)
+            self.viewer.add_geom(echo_source)
 
         return self.viewer.render(return_rgb_array = mode=='rgb_array')
 
