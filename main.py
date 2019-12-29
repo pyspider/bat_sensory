@@ -14,12 +14,14 @@ def main():
         bat = LidarBat(0, 0.3, 0.75, 1, dt=TIME_STEP)
         observation = env.reset(bat)
         for t in range(400):
-            env.render(screen_width=1000)
+            env.render(screen_width=500)
             print(f'bat angle: {bat.angle *180 / math.pi}')
             print(f'observation:{observation}')
             action = env.action_space.sample()
-            # action[0] = math.pi/10
-            # action[1] = 5
+            action[0] = math.pi/2
+            action[1] = 50
+            action[2] = 0.6
+            action[3] = 0
             print(f'action: {action}')
             observation, reward, done, info = env.step(action)
             print(f'reward: {reward}')
@@ -27,6 +29,7 @@ def main():
             if done:
                 print(f"Episode finished after {t+1} timesteps")
                 break
+        env.close()
     env.close()
 
 if __name__ == "__main__":
