@@ -32,8 +32,8 @@ class BatFlyingEnv(gym.Env):
         Num   Action
         0     Acceleration
         1     direction to accelerate
-        4     Emit Pulse
-        5     Pulse direction
+        2     Emit Pulse
+        3     Pulse direction
 
     Reward:
         Reword is 1 for every step take, including the termination step
@@ -123,8 +123,11 @@ class BatFlyingEnv(gym.Env):
                 self.bat.bump(bat_p0.x, bat_p0.y, wall_angle)
                 step_reward = -1.0
 
-        if action[2] >= 0.5:
+        self.bat.emit = False
+        if np.random.rand() > action[2]:
             self.bat.emit_pulse(action[3], self.walls)
+            self.bat.emit = True
+            self.last_pulse = action[2:]
 
         done = None
         step_reward = 0
@@ -174,16 +177,28 @@ class BatFlyingEnv(gym.Env):
             self.bat.x * scale, self.bat.y * scale)
         self.battrans.set_rotation(self.bat.angle)
 
-        if self.bat.state[0][0] != np.inf: 
-            # angle, length = self.bat.state[0]
-            # x, y = length * cos_sin(angle) + np.array([self.bat.x, self.bat.y])
-            x, y = self.bat.state[0]
-            radius = 5  # pixel
+        if self.bat.emit == True: 
+            # draw pulse direction
+            pulse_length = 0.5
+            bat_vec = np.array([self.bat.x, self.bat.y])
+            pulse_vec = pulse_length * cos_sin(self.last_pulse[1])
+            pulse_vec = rotate_vector(pulse_vec, self.bat.angle) + bat_vec
+            x0, y0 = bat_vec * scale
+            x1, y1 = pulse_vec * scale
+            line = self.viewer.draw_line([x0, y0], [x1, y1])
+            self.viewer.add_geom(line)
+
+            # draw echo source point
+            radius = 3  # pixel
+            l, a = self.bat.state[0]
+            echo_source_vec = l * cos_sin(a)
+            echo_source_vec = rotate_vector(echo_source_vec, self.bat.angle) + bat_vec
+            x, y = echo_source_vec * scale
             echo_source = rendering.make_circle(radius)
             echo_source.set_color(0.8, 0.5, 0)
             echotrans = rendering.Transform()
             echo_source.add_attr(echotrans)
-            echotrans.set_translation(scale*x, scale*y)
+            echotrans.set_translation(x, y)
             self.viewer.add_geom(echo_source)
 
         return self.viewer.render(return_rgb_array = mode=='rgb_array')

@@ -18,9 +18,9 @@ def main():
             print(f'bat angle: {bat.angle *180 / math.pi}')
             print(f'observation:{observation}')
             action = env.action_space.sample()
-            action[0] = math.pi/2
-            action[1] = 50
-            action[2] = 0.6
+            # action[0] = 50
+            # action[1] = math.pi/2
+            action[2] = 0.9
             action[3] = 0
             print(f'action: {action}')
             observation, reward, done, info = env.step(action)
