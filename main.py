@@ -10,7 +10,7 @@ def main():
     env = BatFlyingEnv(
         world_width=1.5, world_height=1.5, discrete_length=0.01, dt=TIME_STEP, bat=bat)
     env.reset()
-    for i_episode in range(100):
+    for i_episode in range(10):
         bat = LidarBat(0, 0.3, 0.75, 1, dt=TIME_STEP)
         observation = env.reset(bat)
         for t in range(400):

@@ -139,7 +139,9 @@ class BatFlyingEnv(gym.Env):
         self.t = 0.0
         return np.array(self.bat.state)
 
-    def render(self, screen_width=600, mode='human'):
+    def render(self, screen_width=500, mode='human'):
+        draw_pulse_direction = True
+        draw_echo_source = True
         aspect_ratio = self.world_height / self.world_width
         screen_height = int(aspect_ratio * screen_width)
         scale = screen_width / self.world_width
@@ -178,28 +180,28 @@ class BatFlyingEnv(gym.Env):
         self.battrans.set_rotation(self.bat.angle)
 
         if self.bat.emit == True: 
-            # draw pulse direction
-            pulse_length = 0.5
-            bat_vec = np.array([self.bat.x, self.bat.y])
-            pulse_vec = pulse_length * cos_sin(self.last_pulse[1])
-            pulse_vec = rotate_vector(pulse_vec, self.bat.angle) + bat_vec
-            x0, y0 = bat_vec * scale
-            x1, y1 = pulse_vec * scale
-            line = self.viewer.draw_line([x0, y0], [x1, y1])
-            self.viewer.add_geom(line)
+            if draw_pulse_direction == True:
+                pulse_length = 0.5
+                bat_vec = np.array([self.bat.x, self.bat.y])
+                pulse_vec = pulse_length * cos_sin(self.last_pulse[1])
+                pulse_vec = rotate_vector(pulse_vec, self.bat.angle) + bat_vec
+                x0, y0 = bat_vec * scale
+                x1, y1 = pulse_vec * scale
+                line = self.viewer.draw_line([x0, y0], [x1, y1])
+                self.viewer.add_geom(line)
 
-            # draw echo source point
-            radius = 3  # pixel
-            l, a = self.bat.state[0]
-            echo_source_vec = l * cos_sin(a)
-            echo_source_vec = rotate_vector(echo_source_vec, self.bat.angle) + bat_vec
-            x, y = echo_source_vec * scale
-            echo_source = rendering.make_circle(radius)
-            echo_source.set_color(0.8, 0.5, 0)
-            echotrans = rendering.Transform()
-            echo_source.add_attr(echotrans)
-            echotrans.set_translation(x, y)
-            self.viewer.add_geom(echo_source)
+            if draw_echo_source == True:
+                radius = 4  # pixel
+                l, a = self.bat.state[0]
+                echo_source_vec = l * cos_sin(a)
+                echo_source_vec = rotate_vector(echo_source_vec, self.bat.angle) + bat_vec
+                x, y = echo_source_vec * scale
+                echo_source = rendering.make_circle(radius)
+                echo_source.set_color(0.8, 0.5, 0)
+                echotrans = rendering.Transform()
+                echo_source.add_attr(echotrans)
+                echotrans.set_translation(x, y)
+                self.viewer.add_geom(echo_source)
 
         return self.viewer.render(return_rgb_array = mode=='rgb_array')
 
