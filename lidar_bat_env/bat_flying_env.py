@@ -46,15 +46,15 @@ class BatFlyingEnv(gym.Env):
     """
 
     metadata = {
-        'render.model': ['human', 'rgb_array'],
+        'render.modes': ['human', 'rgb_array'],
         'video.frames_per_second' : FPS
     }
 
     def __init__(
             self,
-            world_width,
-            world_height,
-            discrete_length,
+            world_width=1.5,
+            world_height=1.5,
+            discrete_length=0.01,
             dt=0.005,
             bat=None,
             walls=None,
@@ -66,6 +66,13 @@ class BatFlyingEnv(gym.Env):
         self.world_height = world_height
         self.discrete_length = discrete_length
         self.dt = 0.005  # [s]
+
+        self.accel_reward = 0
+        self.accel_angle_reward = 0
+        self.pulse_reward = 0
+        self.pulse_angle_reward = 0
+        self.bump_reward = -100.0
+        self.fliyng_reward = 1
 
         margin = 0.1
         p0 = Point(margin, margin)
@@ -105,6 +112,7 @@ class BatFlyingEnv(gym.Env):
         self.default_bat = lambda: LidarBat(0, 0.3, 0.75, 3, self.dt)
         self.bat = self.default_bat() if bat is None else bat
         self.viewer = None
+        self.state = None
         self.seed()
 
     def seed(self, seed=None):
@@ -112,8 +120,14 @@ class BatFlyingEnv(gym.Env):
         return [seed]
    
     def step(self, action):
+        step_reward = 0
+        done = False
+        accel, accel_angle, pulse_proba, pulse_angle = action
+        step_reward += self.accel_reward * accel / self.accel_thresh
+        step_reward += self.accel_angle_reward * np.abs(accel_angle) / self.accel_angle_thresh 
+
         bat_p0 = Point(self.bat.x, self.bat.y)
-        self.bat.move(action[0], action[1])
+        self.bat.move(accel, accel_angle)
         bat_p1 = Point(self.bat.x, self.bat.y)
         bat_seg = Segment(bat_p0, bat_p1)
         for w in self.walls:
@@ -121,25 +135,29 @@ class BatFlyingEnv(gym.Env):
             if is_point_in_segment(c_p, bat_seg) == True:
                 wall_angle = math.atan2(w.p1.y - w.p0.y, w.p1.x - w.p0.x)
                 self.bat.bump(bat_p0.x, bat_p0.y, wall_angle)
-                step_reward = -1.0
+                step_reward += self.bump_reward
+                done = True
 
         self.bat.emit = False
-        if np.random.rand() > action[2]:
-            self.bat.emit_pulse(action[3], self.walls)
+        if np.random.rand() > pulse_proba:
+            self.bat.emit_pulse(pulse_angle, self.walls)
             self.bat.emit = True
-            self.last_pulse = action[2:]
+            self.last_pulse_angle = pulse_angle
+            step_reward += self.pulse_angle_reward * np.abs(pulse_angle) / self.pulse_angle_thresh 
+            step_reward += self.pulse_reward
 
-        done = None
-        step_reward = 0
-        return np.array(self.bat.state), step_reward, done, {}
+        self.t += self.dt
+        self.state = np.array(self.bat.state)
+        return self.state, step_reward, done, {}
 
-    def reset(self, bat=None):
-        self.bat = self.default_bat() if bat is None else bat
-        self.reward = 0.0
+    def reset(self):
+        self.bat = self.default_bat()
         self.t = 0.0
-        return np.array(self.bat.state)
+        self.state = np.array(self.bat.state)
+        self.close()
+        return self.state
 
-    def render(self, screen_width=500, mode='human'):
+    def render(self, mode='human', screen_width=500):
         draw_pulse_direction = True
         draw_echo_source = True
         aspect_ratio = self.world_height / self.world_width
@@ -183,7 +201,7 @@ class BatFlyingEnv(gym.Env):
             if draw_pulse_direction == True:
                 pulse_length = 0.5
                 bat_vec = np.array([self.bat.x, self.bat.y])
-                pulse_vec = pulse_length * cos_sin(self.last_pulse[1])
+                pulse_vec = pulse_length * cos_sin(self.last_pulse_angle)
                 pulse_vec = rotate_vector(pulse_vec, self.bat.angle) + bat_vec
                 x0, y0 = bat_vec * scale
                 x1, y1 = pulse_vec * scale
@@ -197,7 +215,7 @@ class BatFlyingEnv(gym.Env):
                 echo_source_vec = rotate_vector(echo_source_vec, self.bat.angle) + bat_vec
                 x, y = echo_source_vec * scale
                 echo_source = rendering.make_circle(radius)
-                echo_source.set_color(0.8, 0.5, 0)
+                echo_source.set_color(0.9, 0.65, 0.4)
                 echotrans = rendering.Transform()
                 echo_source.add_attr(echotrans)
                 echotrans.set_translation(x, y)
