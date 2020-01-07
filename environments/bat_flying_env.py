@@ -112,9 +112,17 @@ class BatFlyingEnv(gym.Env):
             dtype=np.float32)
         
         self.max_echo_distance = 10
+        bat_memory_low = np.array(
+            [[0, -1] for i in range(self.bat.n_memory)],
+            dtype=np.float32
+        ).ravel()
+        bat_memory_high = np.array(
+            [[self.max_echo_distance, 1] for i in range(self.bat.n_memory))],
+            dtype=np.float32
+        ).ravel()
         self.observation_space = spaces.Box(
-            np.zeros(2),
-            np.array([self.max_echo_distance, 1]),
+            bat_memory_low,
+            bat_memory_high,
             dtype=np.float32)
         
         self.viewer = None
