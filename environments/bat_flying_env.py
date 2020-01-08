@@ -52,8 +52,8 @@ class BatFlyingEnv(gym.Env):
 
     def __init__(
             self,
-            world_width=1.5,
-            world_height=1.5,
+            world_width=4.5,
+            world_height=4.5,
             discrete_length=0.01,
             dt=0.005,
             bat=None,
@@ -89,7 +89,8 @@ class BatFlyingEnv(gym.Env):
         self.walls = [] if walls is None else walls
 
         # bat settings
-        self.default_bat = lambda: LidarBat(0, 0.3, 0.75, 3, self.dt)
+        self.max_echo_distance = 10
+        self.default_bat = lambda: LidarBat(1, 2, 2, 3, self.dt)
         self.bat = self.default_bat() if bat is None else bat
 
         # self.goal_area = () if goal_area is None else goal_area
@@ -97,27 +98,21 @@ class BatFlyingEnv(gym.Env):
         self.max_accel_angle = math.pi / 2 # [rad]
         self.max_pulse_angle = math.pi / 4 # [rad]
 
-        # env settings
+        ## env settings
+        self.action_low = np.array([-1.0, -1.0, 0, -1.0])
+        self.action_high = np.ones(4)
         self.action_space = spaces.Box(
-            np.array([
-                -1.0,
-                -1.0,
-                0,
-                -1.0]),
-            np.array([
-                1.0,
-                1.0,
-                1.0,
-                1.0]),
+            self.action_low,
+            self.action_high,
             dtype=np.float32)
         
-        self.max_echo_distance = 10
+        # observation
         bat_memory_low = np.array(
             [[0, -1] for i in range(self.bat.n_memory)],
             dtype=np.float32
         ).ravel()
         bat_memory_high = np.array(
-            [[self.max_echo_distance, 1] for i in range(self.bat.n_memory))],
+            [[self.max_echo_distance, 1] for i in range(self.bat.n_memory)],
             dtype=np.float32
         ).ravel()
         self.observation_space = spaces.Box(
@@ -134,9 +129,11 @@ class BatFlyingEnv(gym.Env):
         return [seed]
    
     def step(self, action):
-        step_reward = 0
+        action = np.clip(action, self.action_low, self.action_high)
+        step_reward = 0.1
         done = False
         accel, accel_angle, pulse_proba, pulse_angle = action
+
         step_reward += self.accel_reward * accel
         step_reward += self.accel_angle_reward * np.abs(accel_angle)
 
@@ -161,14 +158,17 @@ class BatFlyingEnv(gym.Env):
             step_reward += self.pulse_reward
 
         self.t += self.dt
-        self.state = np.array(self.bat.state)
+        self.state = self._get_observation()
         return self.state, step_reward, done, {}
+
+    def _get_observation(self):
+        return np.clip(np.array(self.bat.state), -1, self.max_echo_distance).ravel().astype(np.float32)
 
     def reset(self):
         self.bat = self.default_bat()
         self.t = 0.0
-        self.state = np.array(self.bat.state)
         self.close()
+        self.state = self._get_observation()
         return self.state
 
     def render(self, mode='human', screen_width=500):

@@ -167,6 +167,8 @@ class LidarBat(object):
         self.state[0] = new_observation
 
     def move(self, acceleration, angle):
+        # a_x = acceleration * math.cos(self.angle + angle) 
+        # a_y = acceleration * math.sin(self.angle + angle)
         a_x, a_y = acceleration * cos_sin(self.angle + angle)
         self.x += (self.v_x + 1/2 * a_x * self.dt) * self.dt
         self.y += (self.v_y + 1/2 * a_y * self.dt) * self.dt
@@ -179,6 +181,7 @@ class LidarBat(object):
         simulate partially inelastic collisions.
         e: coefficient of restitution
         '''
+        # sin, cos = math.sin(surface_angle), math.cos(surface_angle)
         cos, sin = cos_sin(surface_angle)
         v_to_surface = self.v_x * sin + self.v_y * cos
         v_along_surface = self.v_x * cos+ self.v_y * sin
