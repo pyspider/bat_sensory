@@ -66,13 +66,13 @@ class BatFlyingEnv(gym.Env):
         self.world_width = world_width
         self.world_height = world_height
         self.discrete_length = discrete_length
-        self.dt = 0.01  # [s]
-        # self.dt = 0.005  # [s]
+        # self.dt = 0.01  # [s]
+        self.dt = 0.005  # [s]
 
-        self.accel_reward = -0.1
-        self.accel_angle_reward = -0.1
-        self.pulse_reward = 0
-        self.pulse_angle_reward = 0
+        self.accel_reward = -0.0001
+        self.accel_angle_reward = -0.0001
+        self.pulse_reward = -0.0001
+        self.pulse_angle_reward = -0.0001
         self.bump_reward = -1
         self.low_speed_reward = -1
         self.fliyng_reward = 1
@@ -152,10 +152,10 @@ class BatFlyingEnv(gym.Env):
                 wall_angle = math.atan2(w.p1.y - w.p0.y, w.p1.x - w.p0.x)
                 self.bat.bump(bat_p0.x, bat_p0.y, wall_angle)
                 step_reward += self.bump_reward
-                done = True
+                # done = True
 
         self.bat.emit = False
-        if np.random.rand() > pulse_proba:
+        if np.random.rand() > pulse_proba/2 + 0.3:
             self.bat.emit_pulse(pulse_angle * self.max_pulse_angle, self.walls)
             self.bat.emit = True
             self.last_pulse_angle = pulse_angle * self.max_pulse_angle
@@ -164,9 +164,11 @@ class BatFlyingEnv(gym.Env):
 
         if np.linalg.norm([self.bat.v_x, self.bat.v_y]) < 1:
             step_reward += self.low_speed_reward
-            done = True
+            # done = True
 
         self.t += self.dt
+        if 5 < self.t:
+            done = True
         self.state = self._get_observation()
         return self.state, step_reward, done, {}
 

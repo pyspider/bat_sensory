@@ -81,8 +81,8 @@ class LidarBat(object):
         self.emit = False
 
         self.lidar_length = 20
-        self.lidar_left_angle = math.pi / 8
-        self.lidar_right_angle = -math.pi / 8
+        self.lidar_left_angle = (math.pi / 6) / 2
+        self.lidar_right_angle = -(math.pi / 6) / 2
         self.lidar_range = np.array([
             self.lidar_left_angle, self.lidar_right_angle])  # [rad]
         self.lidar_center_angle = self.angle
