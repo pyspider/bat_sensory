@@ -38,7 +38,7 @@ def cal_cross_point(s0: Segment, s1: Segment) -> Point:
 
 def rotate_vector(v, angle):
     return np.array(
-        [[ np.cos(angle), -np.sin(angle)], 
+        [[np.cos(angle), -np.sin(angle)], 
          [np.sin(angle), np.cos(angle)]]) @ v
 
 def is_point_in_segment(p: Point, s: Segment) -> bool:
@@ -76,7 +76,7 @@ class LidarBat(object):
         self.body_weight = 23e-3 # [kg]
         self.size = 7e-2  # [m]
 
-        self.n_memory = 5  # number of states
+        self.n_memory = 1  # number of states
         self.state = np.array([[np.inf, 0] for i in range(self.n_memory)])
         self.emit = False
 

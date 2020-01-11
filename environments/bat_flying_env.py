@@ -1,4 +1,3 @@
-from collections import namedtuple
 import math
 import gym
 from gym import spaces, logger
@@ -9,6 +8,7 @@ from .lidar_bat import *
 
 
 FPS = 60
+
 
 
 class BatFlyingEnv(gym.Env):
@@ -66,17 +66,19 @@ class BatFlyingEnv(gym.Env):
         self.world_width = world_width
         self.world_height = world_height
         self.discrete_length = discrete_length
-        self.dt = 0.005  # [s]
+        self.dt = 0.01  # [s]
+        # self.dt = 0.005  # [s]
 
-        self.accel_reward = 0
-        self.accel_angle_reward = 0
+        self.accel_reward = -0.1
+        self.accel_angle_reward = -0.1
         self.pulse_reward = 0
         self.pulse_angle_reward = 0
-        self.bump_reward = -100.0
+        self.bump_reward = -1
+        self.low_speed_reward = -1
         self.fliyng_reward = 1
 
         # walls settings
-        margin = 0.1
+        margin = 0.01
         p0 = Point(margin, margin)
         p1 = Point(margin, world_height - margin)
         p2 = Point(world_width - margin, world_height - margin)
@@ -87,11 +89,6 @@ class BatFlyingEnv(gym.Env):
         w3 = Segment(p3, p0)
         walls = [w0, w1, w2, w3]
         self.walls = [] if walls is None else walls
-
-        # bat settings
-        self.max_echo_distance = 10
-        self.default_bat = lambda: LidarBat(1, 2, 2, 3, self.dt)
-        self.bat = self.default_bat() if bat is None else bat
 
         # self.goal_area = () if goal_area is None else goal_area
         self.max_accel = 50  # [m/s^2]
@@ -106,7 +103,15 @@ class BatFlyingEnv(gym.Env):
             self.action_high,
             dtype=np.float32)
         
+        # bat settings
+        self.seed()
+        if bat is None:
+            self._reset_bat()
+        else:
+            self.bat = bat
+
         # observation
+        self.max_echo_distance = 10
         bat_memory_low = np.array(
             [[0, -1] for i in range(self.bat.n_memory)],
             dtype=np.float32
@@ -130,7 +135,7 @@ class BatFlyingEnv(gym.Env):
    
     def step(self, action):
         action = np.clip(action, self.action_low, self.action_high)
-        step_reward = 0.1
+        step_reward = self.fliyng_reward
         done = False
         accel, accel_angle, pulse_proba, pulse_angle = action
 
@@ -157,6 +162,10 @@ class BatFlyingEnv(gym.Env):
             step_reward += self.pulse_angle_reward * np.abs(pulse_angle) 
             step_reward += self.pulse_reward
 
+        if np.linalg.norm([self.bat.v_x, self.bat.v_y]) < 1:
+            step_reward += self.low_speed_reward
+            done = True
+
         self.t += self.dt
         self.state = self._get_observation()
         return self.state, step_reward, done, {}
@@ -165,13 +174,37 @@ class BatFlyingEnv(gym.Env):
         return np.clip(np.array(self.bat.state), -1, self.max_echo_distance).ravel().astype(np.float32)
 
     def reset(self):
-        self.bat = self.default_bat()
+        self._reset_bat()
+        self._reset_walls()
         self.t = 0.0
         self.close()
         self.state = self._get_observation()
         return self.state
 
-    def render(self, mode='human', screen_width=500):
+    def _reset_bat(self):
+        low = np.array([-math.pi, 0.2, 0.2])
+        high = np.array([math.pi, 4.3, 4.3])
+        init_bat_params = self.np_random.uniform(low=low, high=high)
+        init_speed = 5
+        self.bat = LidarBat(*init_bat_params, init_speed, self.dt)
+
+    def _reset_walls(self):
+        self.walls = self.walls[:4]
+        p = np.linspace(1.5, 3.5, 3)
+        # p = np.array([1.5, 3])
+        xs, ys = np.meshgrid(p, p)
+        xs = xs.ravel() + self.np_random.uniform(-0.3, 0.3, 9)
+        ys = ys.ravel() + self.np_random.uniform(-0.3, 0.3, 9)
+        angles = self.np_random.uniform(-math.pi, math.pi, 9)
+        l = 0.3  # wall length
+        for x, y, a in zip(xs, ys, angles):
+            c, s = (l / 2) * cos_sin(a)
+            p0 = Point(x + c, y + s)
+            p1 = Point(x - c, y - s)
+            self.walls.append(Segment(p0, p1))
+
+
+    def render(self, mode='human', screen_width=1000):
         # whether draw pulse and echo source
         draw_pulse_direction = True
         draw_echo_source = True
@@ -200,15 +233,21 @@ class BatFlyingEnv(gym.Env):
             self.viewer.add_geom(bat_geom)
             self._bat_geom = bat_geom
 
-            wall_width = 5  # pixel
+            wall_width = 10  # pixel
+            # for w in self.walls:
+            #     x0, y0, x1, y1 = w.unpack() * scale
+            #     l, r = x0 - wall_width/2, x1 + wall_width/2, 
+            #     b, t = y0 - wall_width/2, y1 + wall_width/2
+            #     wall_geom = rendering.FilledPolygon(
+            #         [(l, b), (l, t), (r, t), (r, b)])
+            #     wall_geom.set_color(0.5, 0.5, 0.5)
+            #     self.viewer.add_geom(wall_geom)
             for w in self.walls:
                 x0, y0, x1, y1 = w.unpack() * scale
-                l, r = x0 - wall_width/2, x1 + wall_width/2, 
-                b, t = y0 - wall_width/2, y1 + wall_width/2
-                wall_geom = rendering.FilledPolygon(
-                    [(l, b), (l, t), (r, t), (r, b)])
-                wall_geom.set_color(0.5, 0.5, 0.5)
-                self.viewer.add_geom(wall_geom)
+                line = rendering.Line((x0, y0), (x1, y1))
+                line.linewidth = rendering.LineWidth(5)
+                line.set_color(0.5, 0.5, 0.5)
+                self.viewer.add_geom(line)
         
         bat_geom = self._bat_geom
         self.battrans.set_translation(
@@ -245,3 +284,4 @@ class BatFlyingEnv(gym.Env):
         if self.viewer:
             self.viewer.close()
             self.viewer = None
+
