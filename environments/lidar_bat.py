@@ -70,14 +70,16 @@ class LidarBat(object):
         self.angle = init_angle
         self.x = init_x  # [m]
         self.y = init_y  # [m]
+        self.bat_vec = np.array([self.x, self.y])
         self.v_x, self.v_y = init_speed * cos_sin(init_angle)  # [m/s]
+        self.v_vec = np.array([self.v_x, self.v_y])
         self.dt = dt  # [s]
 
         self.body_weight = 23e-3 # [kg]
         self.size = 7e-2  # [m]
 
-        self.n_memory = 1  # number of states
-        self.state = np.array([[np.inf, 0] for i in range(self.n_memory)])
+        self.n_memory = 10  # number of states
+        self.state = np.array([[0, np.inf] for i in range(self.n_memory)])
         self.emit = False
 
         self.lidar_length = 20
@@ -85,19 +87,18 @@ class LidarBat(object):
         self.lidar_right_angle = -(math.pi / 6) / 2
         self.lidar_range = np.array([
             self.lidar_left_angle, self.lidar_right_angle])  # [rad]
-        self.lidar_center_angle = self.angle
     
 
-    def emit_pulse(self, lidar_angle, obstacle_segments):
-        left_lidar_seg, right_lidar_seg = self._lidar_segments(lidar_angle)
+    def emit_pulse(self, lidar_vec, obstacle_segments):
+        left_lidar_seg, right_lidar_seg = self._lidar_segments(lidar_vec)
         left_lidar_vec = left_lidar_seg.p1.unpack() - left_lidar_seg.p0.unpack()
         right_lidar_vec = right_lidar_seg.p1.unpack() - right_lidar_seg.p0.unpack()
         cs0 = cos_similarity(left_lidar_vec, right_lidar_vec)
 
         detected_points = []
         for s in obstacle_segments:
-            edge_vec0 = np.array([s.p0.x - self.x, s.p0.y - self.y])
-            edge_vec1 = np.array([s.p1.x - self.x, s.p1.y - self.y])
+            edge_vec0 = s.p0.unpack() - self.bat_vec
+            edge_vec1 = s.p1.unpack() - self.bat_vec
 
             cs1 = cos_similarity(edge_vec0, left_lidar_vec)
             cs2 = cos_similarity(edge_vec0, right_lidar_vec)
@@ -132,65 +133,52 @@ class LidarBat(object):
                 detected_points.append(new_seg.p1)
         
         min_length = np.inf
-        nearest_point = None
+        nearest_point_vec = None
         for p in detected_points:
-            detected_length = np.linalg.norm([p.y - self.y, p.x - self.x])
+            detected_vec = p.unpack() - self.bat_vec
+            detected_length = np.linalg.norm(detected_vec)
             if min_length > detected_length:
                 min_length = detected_length
-                nearest_point = p
-        
-        if nearest_point is None:
-            observation = np.array([np.inf, 0])
+                nearest_point_vec = detected_vec
+        if nearest_point_vec is None:
+            observation = np.array([0, np.inf])
         else:
-            detected_vec = Point(nearest_point.x - self.x, nearest_point.y - self.y)
-            bat_vec = cos_sin(self.angle)
-            angle_sign = rotation_direction(bat_vec, detected_vec)
-            detected_angle = angle_sign * math.acos(cos_similarity(bat_vec, detected_vec))
-            observation = np.array([min_length, detected_angle])
+            observation = rotate_vector(nearest_point_vec, self.angle) 
         self._update_state(observation)
         return observation
 
-    def _lidar_segments(self, lidar_angle):
-        v_left  = self.lidar_length * cos_sin(self.lidar_left_angle)
-        v_right = self.lidar_length * cos_sin(self.lidar_right_angle)
-        v_left  = rotate_vector(rotate_vector(v_left, self.angle), lidar_angle)
-        v_right = rotate_vector(rotate_vector(v_right, self.angle), lidar_angle)
-        bat_position = np.array([self.x, self.y])
-        v_left, v_right = v_left + bat_position, v_right + bat_position
-        bat_p = Point(self.x, self.y)
-        left_p = Point(v_left[0], v_left[1])
-        right_p = Point(v_right[0], v_right[1])
+    def _lidar_segments(self, lidar_vec):
+        lidar_vec = rotate_vector(lidar_vec, -self.angle)
+        v_left  = rotate_vector(lidar_vec, self.lidar_left_angle)
+        v_right = rotate_vector(lidar_vec, self.lidar_right_angle)
+        v_left, v_right = v_left + self.bat_vec, v_right + self.bat_vec
+        bat_p = Point(*self.bat_vec)
+        left_p = Point(*v_left)
+        right_p = Point(*v_right)
         return Segment(bat_p, left_p), Segment(bat_p, right_p)
 
     def _update_state(self, new_observation):
         self.state[1:] = self.state[:-1]
         self.state[0] = new_observation
 
-    def move(self, acceleration, angle):
-        # a_x = acceleration * math.cos(self.angle + angle) 
-        # a_y = acceleration * math.sin(self.angle + angle)
-        a_x, a_y = acceleration * cos_sin(self.angle + angle)
-        self.x += (self.v_x + 1/2 * a_x * self.dt) * self.dt
-        self.y += (self.v_y + 1/2 * a_y * self.dt) * self.dt
-        self.v_x += a_x * self.dt
-        self.v_y += a_y * self.dt
+    def move(self, accel_vec):
+        accel_vec = rotate_vector(accel_vec, self.angle)
+        self.bat_vec += (self.v_vec + (accel_vec/2) * self.dt) * self.dt
+        self.v_vec += accel_vec * self.dt
         self._cal_angle()
     
-    def bump(self, x0, y0, surface_angle, e=0.3):
+    def bump(self, bat_vec, surface_vec, e=0.3):
         '''
         simulate partially inelastic collisions.
         e: coefficient of restitution
         '''
-        # sin, cos = math.sin(surface_angle), math.cos(surface_angle)
-        cos, sin = cos_sin(surface_angle)
-        v_to_surface = self.v_x * sin + self.v_y * cos
-        v_along_surface = self.v_x * cos+ self.v_y * sin
-        self.v_x = - e * v_to_surface * sin + v_along_surface * cos
-        self.v_y = - e * v_to_surface * cos + v_along_surface * sin
-        self.x = x0 + self.v_x * self.dt
-        self.y = y0 + self.v_y * self.dt
+        T = surface_vec / np.linalg.norm(surface_vec) # Tangent vector
+        N = np.array([-T[1], T[0]])  # Normal vector
+        v_T = np.inner(self.v_vec, T) * T
+        v_N = np.inner(self.v_vec, N) * N
+        self.v_vec = -e * v_N + v_T
+        self.bat_vec = bat_vec + self.v_vec * self.dt
         self._cal_angle()
 
     def _cal_angle(self):
-        self.angle = math.atan2(self.v_y, self.v_x)
-        self.lidar_center_angle = self.angle
+        self.angle = math.atan2(*self.v_vec[::-1])
