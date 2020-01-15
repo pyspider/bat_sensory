@@ -82,7 +82,7 @@ class LidarBat(object):
         self.state = np.array([[0, np.inf] for i in range(self.n_memory)])
         self.emit = False
 
-        self.lidar_length = 20
+        self.lidar_length = 10
         self.lidar_left_angle = (math.pi / 6) / 2
         self.lidar_right_angle = -(math.pi / 6) / 2
         self.lidar_range = np.array([
@@ -90,6 +90,7 @@ class LidarBat(object):
     
 
     def emit_pulse(self, lidar_vec, obstacle_segments):
+        lidar_vec = self.lidar_length * lidar_vec / np.linalg.norm(lidar_vec)
         left_lidar_seg, right_lidar_seg = self._lidar_segments(lidar_vec)
         left_lidar_vec = left_lidar_seg.p1.unpack() - left_lidar_seg.p0.unpack()
         right_lidar_vec = right_lidar_seg.p1.unpack() - right_lidar_seg.p0.unpack()
@@ -144,6 +145,7 @@ class LidarBat(object):
             observation = np.array([0, np.inf])
         else:
             observation = rotate_vector(nearest_point_vec, self.angle) 
+        observation /= self.lidar_length
         self._update_state(observation)
         return observation
 

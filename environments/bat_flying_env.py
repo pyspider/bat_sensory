@@ -113,8 +113,7 @@ class BatFlyingEnv(gym.Env):
             self.bat = bat
 
         # observation
-        self.max_echo_distance = 10
-        high = np.ones(self.bat.n_memory * 2) * self.max_echo_distance
+        high = np.ones(self.bat.n_memory * 2)
         self.observation_space = spaces.Box(
             -high,
             high,
@@ -153,9 +152,7 @@ class BatFlyingEnv(gym.Env):
         self.bat.emit = False
         # freq emit pulse [0.3, 0.8]
         if np.random.rand() < pulse_proba/2 + self.lower_bound_freq_emit_pulse:
-            self.bat.emit_pulse(
-                self.max_echo_distance * pulse_vec / np.linalg.norm(pulse_vec),
-                 self.walls)
+            self.bat.emit_pulse(pulse_vec, self.walls)
             self.bat.emit = True
             self.last_pulse = pulse_vec / np.linalg.norm(pulse_vec)
             step_reward += self.pulse_reward
@@ -168,22 +165,15 @@ class BatFlyingEnv(gym.Env):
         self.t += self.dt
         if 5 < self.t:
             done = True
-        self.state = self._get_observation()
+        self._update_observation()
         return self.state, step_reward, done, {}
-
-    def _get_observation(self):
-        return np.clip(
-            np.array(self.bat.state),
-            -self.max_echo_distance, 
-            self.max_echo_distance
-        ).ravel().astype(np.float32)
 
     def reset(self):
         self._reset_bat()
         self._reset_walls()
         self.t = 0.0
         self.close()
-        self.state = self._get_observation()
+        self._update_observation()
         return self.state
 
     def _reset_bat(self):
@@ -194,6 +184,7 @@ class BatFlyingEnv(gym.Env):
         init_bat_params = self.np_random.uniform(low=low, high=high)
         init_speed = 5
         self.bat = LidarBat(*init_bat_params, init_speed, self.dt)
+        self._update_observation()
 
     def _reset_walls(self):
         self.walls = self.walls[:4]
@@ -209,7 +200,11 @@ class BatFlyingEnv(gym.Env):
             p0 = Point(x + c, y + s)
             p1 = Point(x - c, y - s)
             self.walls.append(Segment(p0, p1))
-
+    
+    def _update_observation(self):
+        obs = np.copy(self.bat.state)
+        obs = np.clip(obs, -1, 1)
+        self.state = np.ravel(obs).astype(np.float32)
 
     def render(self, mode='human', screen_width=1000):
         # whether draw pulse and echo source
@@ -273,7 +268,7 @@ class BatFlyingEnv(gym.Env):
 
             if draw_echo_source == True:
                 radius = 4  # pixel
-                echo_source_vec = self.bat.state[0]
+                echo_source_vec = self.bat.state[0] * self.bat.lidar_length
                 echo_source_vec = rotate_vector(
                     echo_source_vec, -self.bat.angle) + self.bat.bat_vec
                 x, y = echo_source_vec * scale
