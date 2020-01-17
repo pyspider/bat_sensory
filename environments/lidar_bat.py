@@ -43,8 +43,8 @@ def rotate_vector(v, angle):
 
 def is_point_in_segment(p: Point, s: Segment) -> bool:
     e = 1e-8  # e is small number, for excuse 
-    x_ok = min(s.p0.x, s.p1.x) - e <= p.x and p.x <= max(s.p0.x, s.p1.x) + e
-    y_ok = min(s.p0.y, s.p1.y) - e <= p.y and p.y <= max(s.p0.y, s.p1.y) + e
+    x_ok = (min(s.p0.x, s.p1.x) - e <= p.x) and (p.x <= max(s.p0.x, s.p1.x) + e)
+    y_ok = (min(s.p0.y, s.p1.y) - e <= p.y) and (p.y <= max(s.p0.y, s.p1.y) + e)
     return x_ok and y_ok
 
 def convert2vec(v):
@@ -78,7 +78,7 @@ class LidarBat(object):
         self.body_weight = 23e-3 # [kg]
         self.size = 7e-2  # [m]
 
-        self.n_memory = 10  # number of states
+        self.n_memory = 5  # number of states
         self.state = np.array([[0, np.inf] for i in range(self.n_memory)])
         self.emit = False
 
@@ -89,8 +89,8 @@ class LidarBat(object):
             self.lidar_left_angle, self.lidar_right_angle])  # [rad]
     
 
-    def emit_pulse(self, lidar_vec, obstacle_segments):
-        lidar_vec = self.lidar_length * lidar_vec / np.linalg.norm(lidar_vec)
+    def emit_pulse(self, lidar_angle, obstacle_segments):
+        lidar_vec = cos_sin(lidar_angle) * self.lidar_length
         left_lidar_seg, right_lidar_seg = self._lidar_segments(lidar_vec)
         left_lidar_vec = left_lidar_seg.p1.unpack() - left_lidar_seg.p0.unpack()
         right_lidar_vec = right_lidar_seg.p1.unpack() - right_lidar_seg.p0.unpack()
@@ -144,15 +144,15 @@ class LidarBat(object):
         if nearest_point_vec is None:
             observation = np.array([0, np.inf])
         else:
-            observation = rotate_vector(nearest_point_vec, self.angle) 
+            observation = rotate_vector(nearest_point_vec, -self.angle) 
         observation /= self.lidar_length
         self._update_state(observation)
         return observation
 
     def _lidar_segments(self, lidar_vec):
-        lidar_vec = rotate_vector(lidar_vec, -self.angle)
-        v_left  = rotate_vector(lidar_vec, self.lidar_left_angle)
-        v_right = rotate_vector(lidar_vec, self.lidar_right_angle)
+        lidar_vec = rotate_vector(lidar_vec, self.angle)
+        v_left    = rotate_vector(lidar_vec, self.lidar_left_angle)
+        v_right   = rotate_vector(lidar_vec, self.lidar_right_angle)
         v_left, v_right = v_left + self.bat_vec, v_right + self.bat_vec
         bat_p = Point(*self.bat_vec)
         left_p = Point(*v_left)
@@ -163,13 +163,12 @@ class LidarBat(object):
         self.state[1:] = self.state[:-1]
         self.state[0] = new_observation
 
-    def move(self, accel_vec):
-        accel_vec = rotate_vector(accel_vec, self.angle)
-        self.bat_vec += (self.v_vec + (accel_vec/2) * self.dt) * self.dt
-        self.v_vec += accel_vec * self.dt
+    def move(self, angle):
+        self.v_vec = rotate_vector(self.v_vec, angle)
+        self.bat_vec += self.v_vec * self.dt
         self._cal_angle()
     
-    def bump(self, bat_vec, surface_vec, e=0.3):
+    def bump(self, bat_vec, surface_vec, e=1):
         '''
         simulate partially inelastic collisions.
         e: coefficient of restitution

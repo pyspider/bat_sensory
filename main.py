@@ -28,7 +28,7 @@ def main():
             print('observation:')
             print(observation)
             action = env.action_space.sample()
-            # action[0] = 50
+            action[0] = 0
             # action[1] = math.pi/2
             # action[2] = 0.9
             # action[3] = 0

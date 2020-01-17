@@ -28,12 +28,11 @@ class BatFlyingEnv(gym.Env):
         1    echo direction -180 deg 180 deg
 
     Actions:
-        Type: Box(6)
+        Type: Box(3)
         Num   Action
-        0     Acceleration
-        1     direction to accelerate
-        2     Emit Pulse
-        3     Pulse direction
+        1     Flying direction
+        2     Pulse direction
+        3     Emit Pulse
 
     Reward:
         Reword is 1 for every step take, including the termination step
@@ -71,8 +70,7 @@ class BatFlyingEnv(gym.Env):
 
         self.lower_bound_freq_emit_pulse = 0.3
 
-        self.accel_reward = -0.0001
-        self.accel_angle_reward = -0.0001
+        self.flying_angle_reward = -10.0
         self.pulse_reward = -0.0001
         self.pulse_angle_reward = -0.0001
         self.bump_reward = -100
@@ -93,13 +91,12 @@ class BatFlyingEnv(gym.Env):
         self.walls = [] if walls is None else walls
 
         # self.goal_area = () if goal_area is None else goal_area
-        self.max_accel = 50  # [m/s^2]
-        self.max_accel_angle = math.pi / 2 # [rad]
+        self.max_flying_angle = math.pi / 6 # [rad]
         self.max_pulse_angle = math.pi / 4 # [rad]
 
         ## env settings
-        self.action_low = np.array([-1.0, -1.0, -1.0, -1.0, 0])
-        self.action_high = np.ones(5)
+        self.action_low = np.array([-1.0, -1.0, 0])
+        self.action_high = np.ones(3)
         self.action_space = spaces.Box(
             self.action_low,
             self.action_high,
@@ -131,32 +128,29 @@ class BatFlyingEnv(gym.Env):
         action = np.clip(action, self.action_low, self.action_high)
         step_reward = self.fliyng_reward
         done = False
-        accel_x, accel_y, pulse_x, pulse_y, pulse_proba = action
-        accel_vec = np.array([accel_x, accel_y])
-        pulse_vec = np.array([pulse_x, pulse_y])
-
-        step_reward += self.accel_reward * np.linalg.norm(accel_vec)
+        flying_angle, pulse_angle, pulse_proba = action
+        step_reward += self.flying_angle_reward * np.abs(flying_angle)
 
         bat_p0 = Point(*self.bat.bat_vec)
-        self.bat.move(accel_vec * self.max_accel)
+        self.bat.move(flying_angle * self.max_flying_angle)
         bat_p1 = Point(*self.bat.bat_vec)
         bat_seg = Segment(bat_p0, bat_p1)
         for w in self.walls:
             c_p = cal_cross_point(bat_seg, w)
-            if is_point_in_segment(c_p, bat_seg) == True:
+            if is_point_in_segment(c_p, w) and is_point_in_segment(c_p, bat_seg):
                 wall_vec = w.p0.unpack() - w.p1.unpack()
                 self.bat.bump(bat_p0.unpack(), wall_vec)
                 step_reward += self.bump_reward
-                # done = True
+                done = True
 
         self.bat.emit = False
         # freq emit pulse [0.3, 0.8]
         if np.random.rand() < pulse_proba/2 + self.lower_bound_freq_emit_pulse:
-            self.bat.emit_pulse(pulse_vec, self.walls)
+            self.bat.emit_pulse(pulse_angle * self.max_pulse_angle, self.walls)
             self.bat.emit = True
-            self.last_pulse = pulse_vec / np.linalg.norm(pulse_vec)
+            self.last_pulse_angle = pulse_angle
             step_reward += self.pulse_reward
-            step_reward += self.pulse_angle_reward * np.inner(pulse_vec, np.array([1, 0]))
+            step_reward += self.pulse_angle_reward * np.abs(pulse_angle)
 
         if np.linalg.norm(self.bat.v_vec) < 1:
             step_reward += self.low_speed_reward
@@ -177,10 +171,8 @@ class BatFlyingEnv(gym.Env):
         return self.state
 
     def _reset_bat(self):
-        margin = 0.2
-        low = np.array([-math.pi, margin, margin])
-        high = np.array([
-            math.pi, self.world_width - margin, self.world_height - margin])
+        low = np.array([-math.pi/12, 0.1, 0.7])
+        high = np.array([math.pi/12, 0.2, 0.8])
         init_bat_params = self.np_random.uniform(low=low, high=high)
         init_speed = 5
         self.bat = LidarBat(*init_bat_params, init_speed, self.dt)
@@ -200,6 +192,13 @@ class BatFlyingEnv(gym.Env):
             p0 = Point(x + c, y + s)
             p1 = Point(x - c, y - s)
             self.walls.append(Segment(p0, p1))
+        # l = 0.66  # wall length
+        # acrilyc_panel0 = Segment(Point(1, 1.5), Point(1, 1.5-l))
+        # self.walls.append(acrilyc_panel0)
+        # acrilyc_panel1 = Segment(Point(2, 0), Point(2, l))
+        # self.walls.append(acrilyc_panel1)
+        # acrilyc_panel2 = Segment(Point(3, 1.5), Point(3, 1.5-l))
+        # self.walls.append(acrilyc_panel2)
     
     def _update_observation(self):
         obs = np.copy(self.bat.state)
@@ -235,19 +234,10 @@ class BatFlyingEnv(gym.Env):
             self.viewer.add_geom(bat_geom)
             self._bat_geom = bat_geom
 
-            wall_width = 10  # pixel
-            # for w in self.walls:
-            #     x0, y0, x1, y1 = w.unpack() * scale
-            #     l, r = x0 - wall_width/2, x1 + wall_width/2, 
-            #     b, t = y0 - wall_width/2, y1 + wall_width/2
-            #     wall_geom = rendering.FilledPolygon(
-            #         [(l, b), (l, t), (r, t), (r, b)])
-            #     wall_geom.set_color(0.5, 0.5, 0.5)
-            #     self.viewer.add_geom(wall_geom)
             for w in self.walls:
                 x0, y0, x1, y1 = w.unpack() * scale
                 line = rendering.Line((x0, y0), (x1, y1))
-                line.linewidth = rendering.LineWidth(5)
+                line.linewidth = rendering.LineWidth(10)
                 line.set_color(0.5, 0.5, 0.5)
                 self.viewer.add_geom(line)
         
@@ -258,9 +248,9 @@ class BatFlyingEnv(gym.Env):
         if self.bat.emit == True: 
             if draw_pulse_direction == True:
                 pulse_length = 0.5
-                pulse_vec = pulse_length * self.last_pulse
+                pulse_vec = pulse_length * cos_sin(self.last_pulse_angle)
                 pulse_vec = rotate_vector(
-                    pulse_vec, -self.bat.angle) + self.bat.bat_vec
+                    pulse_vec, self.bat.angle) + self.bat.bat_vec
                 x0, y0 = self.bat.bat_vec * scale
                 x1, y1 = pulse_vec * scale
                 line = self.viewer.draw_line([x0, y0], [x1, y1])
@@ -270,7 +260,7 @@ class BatFlyingEnv(gym.Env):
                 radius = 4  # pixel
                 echo_source_vec = self.bat.state[0] * self.bat.lidar_length
                 echo_source_vec = rotate_vector(
-                    echo_source_vec, -self.bat.angle) + self.bat.bat_vec
+                    echo_source_vec, self.bat.angle) + self.bat.bat_vec
                 x, y = echo_source_vec * scale
                 echo_source = rendering.make_circle(radius)
                 echo_source.set_color(0.9, 0.65, 0.4)
