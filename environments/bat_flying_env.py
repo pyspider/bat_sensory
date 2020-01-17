@@ -171,8 +171,12 @@ class BatFlyingEnv(gym.Env):
         return self.state
 
     def _reset_bat(self):
-        low = np.array([-math.pi/12, 0.1, 0.7])
-        high = np.array([math.pi/12, 0.2, 0.8])
+        # low = np.array([-math.pi/12, 0.1, 0.7])
+        # high = np.array([math.pi/12, 0.2, 0.8])
+        margin = 0.2
+        low = np.array([-math.pi, margin, margin])
+        high = np.array([
+            math.pi, self.world_width - margin, self.world_height - margin])
         init_bat_params = self.np_random.uniform(low=low, high=high)
         init_speed = 5
         self.bat = LidarBat(*init_bat_params, init_speed, self.dt)
