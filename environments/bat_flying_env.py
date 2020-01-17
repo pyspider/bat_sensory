@@ -52,7 +52,7 @@ class BatFlyingEnv(gym.Env):
     def __init__(
             self,
             world_width=4.5,
-            world_height=4.5,
+            world_height=1.5,
             discrete_length=0.01,
             dt=0.005,
             bat=None,
@@ -157,7 +157,7 @@ class BatFlyingEnv(gym.Env):
             # done = True
 
         self.t += self.dt
-        if 5 < self.t:
+        if 1 < self.t:
             done = True
         self._update_observation()
         return self.state, step_reward, done, {}
@@ -171,12 +171,12 @@ class BatFlyingEnv(gym.Env):
         return self.state
 
     def _reset_bat(self):
-        # low = np.array([-math.pi/12, 0.1, 0.7])
-        # high = np.array([math.pi/12, 0.2, 0.8])
-        margin = 0.2
-        low = np.array([-math.pi, margin, margin])
-        high = np.array([
-            math.pi, self.world_width - margin, self.world_height - margin])
+        low = np.array([-math.pi/48, 0.02, 0.7])
+        high = np.array([math.pi/48, 0.2, 0.8])
+        # margin = 0.2
+        # low = np.array([-math.pi, margin, margin])
+        # high = np.array([
+        #     math.pi, self.world_width - margin, self.world_height - margin])
         init_bat_params = self.np_random.uniform(low=low, high=high)
         init_speed = 5
         self.bat = LidarBat(*init_bat_params, init_speed, self.dt)
@@ -184,25 +184,27 @@ class BatFlyingEnv(gym.Env):
 
     def _reset_walls(self):
         self.walls = self.walls[:4]
-        p = np.linspace(1.5, 3.5, 3)
-        # p = np.array([1.5, 3])
-        xs, ys = np.meshgrid(p, p)
-        xs = xs.ravel() + self.np_random.uniform(-0.3, 0.3, 9)
-        ys = ys.ravel() + self.np_random.uniform(-0.3, 0.3, 9)
-        angles = self.np_random.uniform(-math.pi, math.pi, 9)
-        l = 0.3  # wall length
-        for x, y, a in zip(xs, ys, angles):
-            c, s = (l / 2) * cos_sin(a)
-            p0 = Point(x + c, y + s)
-            p1 = Point(x - c, y - s)
-            self.walls.append(Segment(p0, p1))
-        # l = 0.66  # wall length
-        # acrilyc_panel0 = Segment(Point(1, 1.5), Point(1, 1.5-l))
-        # self.walls.append(acrilyc_panel0)
-        # acrilyc_panel1 = Segment(Point(2, 0), Point(2, l))
-        # self.walls.append(acrilyc_panel1)
-        # acrilyc_panel2 = Segment(Point(3, 1.5), Point(3, 1.5-l))
-        # self.walls.append(acrilyc_panel2)
+
+        # p = np.linspace(1.5, 3.5, 3)
+        # # p = np.array([1.5, 3])
+        # xs, ys = np.meshgrid(p, p)
+        # xs = xs.ravel() + self.np_random.uniform(-0.3, 0.3, 9)
+        # ys = ys.ravel() + self.np_random.uniform(-0.3, 0.3, 9)
+        # angles = self.np_random.uniform(-math.pi, math.pi, 9)
+        # l = 0.3  # wall length
+        # for x, y, a in zip(xs, ys, angles):
+        #     c, s = (l / 2) * cos_sin(a)
+        #     p0 = Point(x + c, y + s)
+        #     p1 = Point(x - c, y - s)
+        #     self.walls.append(Segment(p0, p1))
+            
+        l = 0.66  # wall length
+        acrilyc_panel0 = Segment(Point(1, 1.5), Point(1, 1.5-l))
+        self.walls.append(acrilyc_panel0)
+        acrilyc_panel1 = Segment(Point(2, 0), Point(2, l))
+        self.walls.append(acrilyc_panel1)
+        acrilyc_panel2 = Segment(Point(3, 1.5), Point(3, 1.5-l))
+        self.walls.append(acrilyc_panel2)
     
     def _update_observation(self):
         obs = np.copy(self.bat.state)
