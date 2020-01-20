@@ -2,6 +2,7 @@ import math
 import gym
 from gym import spaces, logger
 from gym.utils import seeding
+from gym.envs.classic_control import rendering
 import numpy as np
 
 from .lidar_bat import *
@@ -23,16 +24,16 @@ class BatFlyingEnv(gym.Env):
 
     Observation:
         Type: Box(2)
-        Num  Observation     Min      Max
-        0    echo distance  0        Inf
-        1    echo direction -180 deg 180 deg
+        Num  Observation            Min      Max
+        0    echo source vector     -1       1
+        1    echo source vector     -1       1
 
     Actions:
         Type: Box(3)
         Num   Action
-        1     Flying direction
-        2     Pulse direction
-        3     Emit Pulse
+        0     Flying direction
+        1     Pulse direction
+        2     Probability for emitting pulse
 
     Reward:
         Reword is 1 for every step take, including the termination step
@@ -215,17 +216,17 @@ class BatFlyingEnv(gym.Env):
         # whether draw pulse and echo source
         draw_pulse_direction = True
         draw_echo_source = True
+        draw_bat_trajectory = True
 
         # settings screen
         aspect_ratio = self.world_height / self.world_width
         screen_height = int(aspect_ratio * screen_width)
-        scale = screen_width / self.world_width
+        self.scale = screen_width / self.world_width
 
         # initilize screen
-        from gym.envs.classic_control import rendering
         if self.viewer is None:
             self.viewer = rendering.Viewer(screen_width, screen_height)
-            r = (self.bat.size * scale) / 2
+            r = (self.bat.size * self.scale) / 2
             wing = 4 * math.pi / 5 # angle [rad]
             nose_x, nose_y = r, 0
             r_x, r_y = r * math.cos(-wing), r * math.sin(-wing)
@@ -241,41 +242,64 @@ class BatFlyingEnv(gym.Env):
             self._bat_geom = bat_geom
 
             for w in self.walls:
-                x0, y0, x1, y1 = w.unpack() * scale
+                x0, y0, x1, y1 = w.unpack() * self.scale
                 line = rendering.Line((x0, y0), (x1, y1))
-                line.linewidth = rendering.LineWidth(10)
+                line.linewidth = rendering.LineWidth(30)
                 line.set_color(0.5, 0.5, 0.5)
                 self.viewer.add_geom(line)
         
         bat_geom = self._bat_geom
-        self.battrans.set_translation(*self.bat.bat_vec * scale)
+        self.battrans.set_translation(*self.bat.bat_vec * self.scale)
         self.battrans.set_rotation(self.bat.angle)
 
         if self.bat.emit == True: 
             if draw_pulse_direction == True:
-                pulse_length = 0.5
-                pulse_vec = pulse_length * cos_sin(self.last_pulse_angle)
-                pulse_vec = rotate_vector(
-                    pulse_vec, self.bat.angle) + self.bat.bat_vec
-                x0, y0 = self.bat.bat_vec * scale
-                x1, y1 = pulse_vec * scale
-                line = self.viewer.draw_line([x0, y0], [x1, y1])
-                self.viewer.add_geom(line)
+                self._render_pulse_direction()
 
             if draw_echo_source == True:
-                radius = 4  # pixel
-                echo_source_vec = self.bat.state[0] * self.bat.lidar_length
-                echo_source_vec = rotate_vector(
-                    echo_source_vec, self.bat.angle) + self.bat.bat_vec
-                x, y = echo_source_vec * scale
-                echo_source = rendering.make_circle(radius)
-                echo_source.set_color(0.9, 0.65, 0.4)
-                echotrans = rendering.Transform()
-                echo_source.add_attr(echotrans)
-                echotrans.set_translation(x, y)
-                self.viewer.add_geom(echo_source)
+                self._render_echo_source()
+           
+        if draw_bat_trajectory == True:
+            self._render_bat_trajectory()
 
         return self.viewer.render(return_rgb_array = mode=='rgb_array')
+
+    def _render_pulse_direction(self):
+        pulse_length = 0.3
+        pulse_vec = pulse_length * cos_sin(self.last_pulse_angle)
+        pulse_vec = rotate_vector(
+            pulse_vec, self.bat.angle) + self.bat.bat_vec
+        x0, y0 = self.bat.bat_vec * self.scale
+        x1, y1 = pulse_vec * self.scale
+        line = rendering.Line((x0, y0), (x1, y1))
+        line.linewidth = rendering.LineWidth(10)
+        line.set_color(0.0, 0.0, 1.0)
+        self.viewer.add_geom(line)
+    
+    def _render_echo_source(self):
+        radius = 4  # pixel
+        echo_source_vec = self.bat.state[0] * self.bat.lidar_length
+        echo_source_vec = rotate_vector(
+            echo_source_vec, self.bat.angle) + self.bat.bat_vec
+        x, y = echo_source_vec * self.scale
+        echo_source = rendering.make_circle(radius)
+        echo_source.set_color(0.9, 0.65, 0.4)
+        echotrans = rendering.Transform()
+        echo_source.add_attr(echotrans)
+        echotrans.set_translation(x, y)
+        self.viewer.add_geom(echo_source)
+    
+    def _render_bat_trajectory(self):
+        if self.t > 0.0:
+            x0, y0 = self.last_bat_vec * self.scale
+            x1, y1 = self.bat.bat_vec * self.scale
+            line = rendering.Line((x0, y0), (x1, y1))
+            line.linewidth = rendering.LineWidth(10)
+            line.set_color(0.3, 0.3, 0.3)
+            self.viewer.add_geom(line)
+            self.last_bat_vec = np.copy(self.bat.bat_vec)
+        else:
+            self.last_bat_vec = np.copy(self.bat.bat_vec)
 
     def close(self):
         if self.viewer:
