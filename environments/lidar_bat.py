@@ -66,7 +66,7 @@ def rotation_direction(v0, v1):
     return 1 if outer >= 0 else -1
 
 class LidarBat(object):
-    def __init__(self, init_angle, init_x, init_y, init_speed, dt):
+    def __init__(self, init_angle, init_x, init_y, init_speed, dt, echo_simulator=None, ear_offset=0.02):
         self.angle = init_angle
         self.x = init_x  # [m]
         self.y = init_y  # [m]
@@ -87,9 +87,117 @@ class LidarBat(object):
         self.lidar_right_angle = -(math.pi / 6) / 2
         self.lidar_range = np.array([
             self.lidar_left_angle, self.lidar_right_angle])  # [rad]
+        
+        # Store new optional parameters
+        self.echo_simulator = echo_simulator
+        self.ear_offset = ear_offset
     
 
     def emit_pulse(self, lidar_angle, obstacle_segments):
+        # Try acoustic simulation first if echo_simulator is provided
+        if self.echo_simulator is not None:
+            try:
+                # Compute global source angle
+                global_source_angle = lidar_angle + self.angle
+                
+                # Compute source position (bat position)
+                source_pos = np.array([self.x, self.y])
+                
+                # Compute left/right ear world coordinates using lateral vector
+                # perpendicular to heading scaled by ear_offset
+                heading_vec = cos_sin(self.angle)
+                lateral_vec = np.array([-heading_vec[1], heading_vec[0]])  # perpendicular to heading
+                left_ear_pos = source_pos + lateral_vec * self.ear_offset
+                right_ear_pos = source_pos - lateral_vec * self.ear_offset
+                ear_positions = np.array([left_ear_pos, right_ear_pos])
+                
+                # Convert obstacle segments to the format expected by simulator
+                scene_segments = []
+                for s in obstacle_segments:
+                    seg_data = s.unpack()  # [x0, y0, x1, y1]
+                    scene_segments.append(seg_data)
+                scene_segments = np.array(scene_segments) if scene_segments else np.empty((0, 4))
+                
+                # Prepare kwargs for simulator call
+                kwargs = {
+                    'source_pos': source_pos,
+                    'source_angle': global_source_angle,
+                    'ear_positions': ear_positions,
+                    'scene_segments': scene_segments
+                }
+                
+                # Call simulator either as simulate method or directly callable
+                result = None
+                sim = self.echo_simulator
+                if hasattr(sim, 'simulate') and callable(getattr(sim, 'simulate')):
+                    result = sim.simulate(**kwargs)
+                elif callable(sim):
+                    result = sim(**kwargs)
+                
+                if result is not None:
+                    # Try to extract arrival information from common fields
+                    arrival_data = None
+                    for attr_name in ['first_arrival_samples', 'arrival_samples', 'first_arrival_times', 'arrival_times', 'arrivals']:
+                        if hasattr(result, attr_name):
+                            arrival_data = getattr(result, attr_name)
+                            break
+                    
+                    if arrival_data is not None and len(arrival_data) > 0:
+                        # Try to get sample rate from sim or result
+                        sample_rate = 44100.0  # fallback default
+                        for sr_attr in ['sample_rate', 'sr', 'fs']:
+                            if hasattr(sim, sr_attr):
+                                sample_rate = getattr(sim, sr_attr)
+                                break
+                            elif hasattr(result, sr_attr):
+                                sample_rate = getattr(result, sr_attr)
+                                break
+                        
+                        # Try to get sound speed from sim or result
+                        sound_speed = 343.0  # fallback default
+                        for c_attr in ['c', 'sound_speed']:
+                            if hasattr(sim, c_attr):
+                                sound_speed = getattr(sim, c_attr)
+                                break
+                            elif hasattr(result, c_attr):
+                                sound_speed = getattr(result, c_attr)
+                                break
+                        
+                        # Interpret arrival values as either sample indices or times
+                        arrival_times = None
+                        arrival_array = np.array(arrival_data)
+                        if len(arrival_array) > 0:
+                            # Heuristic: if max value >> 1.0, likely sample indices; otherwise times
+                            if np.max(arrival_array) > 1.0:
+                                # Treat as sample indices, convert to times
+                                arrival_times = arrival_array / sample_rate
+                            else:
+                                # Treat as times directly
+                                arrival_times = arrival_array
+                        
+                        if arrival_times is not None and len(arrival_times) > 0:
+                            # Compute mean arrival time and estimate distance
+                            mean_time = np.mean(arrival_times)
+                            distance = (mean_time * sound_speed) / 2  # divide by 2 for round trip
+                            
+                            # Normalize by lidar_length and create observation
+                            normalized_distance = distance / self.lidar_length
+                            observation = np.array([0.0, normalized_distance], dtype=np.float32)
+                            
+                            # Update state with safe fallback
+                            try:
+                                self._update_state(observation)
+                            except:
+                                # Direct state update fallback
+                                self.state[1:] = self.state[:-1]
+                                self.state[0] = observation
+                            
+                            return observation
+            except:
+                # Silently fall back to original geometric logic on any exception
+                pass
+        
+        # Original geometric lidar logic (unchanged)
         lidar_vec = cos_sin(lidar_angle) * self.lidar_length
         left_lidar_seg, right_lidar_seg = self._lidar_segments(lidar_vec)
         left_lidar_vec = left_lidar_seg.p1.unpack() - left_lidar_seg.p0.unpack()
