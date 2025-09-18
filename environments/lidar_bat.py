@@ -66,7 +66,7 @@ def rotation_direction(v0, v1):
     return 1 if outer >= 0 else -1
 
 class LidarBat(object):
-    def __init__(self, init_angle, init_x, init_y, init_speed, dt):
+    def __init__(self, init_angle, init_x, init_y, init_speed, dt, echo_simulator=None):
         self.angle = init_angle
         self.x = init_x  # [m]
         self.y = init_y  # [m]
@@ -87,9 +87,66 @@ class LidarBat(object):
         self.lidar_right_angle = -(math.pi / 6) / 2
         self.lidar_range = np.array([
             self.lidar_left_angle, self.lidar_right_angle])  # [rad]
+        
+        # Optional acoustic simulator for binaural echo simulation
+        self.echo_simulator = echo_simulator
     
 
     def emit_pulse(self, lidar_angle, obstacle_segments):
+        # Optional acoustic simulation integration
+        if self.echo_simulator is not None:
+            try:
+                # Calculate global source angle (lidar_angle is relative to bat orientation)
+                global_source_angle = self.angle + lidar_angle
+                
+                # Calculate left and right ear positions using ear_offset
+                ear_offset = getattr(self.echo_simulator, 'ear_offset', 0.02)
+                left_ear_x = self.x + ear_offset * math.cos(self.angle + math.pi/2)
+                left_ear_y = self.y + ear_offset * math.sin(self.angle + math.pi/2)
+                right_ear_x = self.x + ear_offset * math.cos(self.angle - math.pi/2)
+                right_ear_y = self.y + ear_offset * math.sin(self.angle - math.pi/2)
+                
+                ear_positions = [(left_ear_x, left_ear_y), (right_ear_x, right_ear_y)]
+                
+                # Run acoustic simulation
+                echo_result = self.echo_simulator.simulate(
+                    source_pos=(self.x, self.y),
+                    source_angle=global_source_angle,
+                    ear_positions=ear_positions,
+                    source_waveform=None,
+                    scene_segments=obstacle_segments
+                )
+                
+                # If we have valid arrival times, estimate distance
+                if (echo_result.left_arrival_idx is not None and 
+                    echo_result.right_arrival_idx is not None):
+                    
+                    # Use mean arrival time to estimate distance
+                    mean_arrival_samples = (echo_result.left_arrival_idx + echo_result.right_arrival_idx) / 2.0
+                    arrival_time_seconds = mean_arrival_samples / self.echo_simulator.sr
+                    
+                    # Convert to distance (divide by 2 for round-trip)
+                    estimated_distance = arrival_time_seconds * self.echo_simulator.c / 2.0
+                    
+                    # Normalize distance relative to lidar range
+                    normalized_distance = min(estimated_distance / getattr(self, 'lidar_length', 1.0), 1.0)
+                    
+                    # Create conservative observation array
+                    observation = np.array([0.0, normalized_distance], dtype=np.float32)
+                    
+                    # Update state using existing method if available
+                    if hasattr(self, '_update_state'):
+                        self._update_state(observation)
+                    else:
+                        self.state = observation
+                    
+                    return observation
+                
+            except Exception as e:
+                # Fall back to geometric logic if acoustic simulation fails
+                pass
+        
+        # Original geometric lidar logic (unchanged)
         lidar_vec = cos_sin(lidar_angle) * self.lidar_length
         left_lidar_seg, right_lidar_seg = self._lidar_segments(lidar_vec)
         left_lidar_vec = left_lidar_seg.p1.unpack() - left_lidar_seg.p0.unpack()
