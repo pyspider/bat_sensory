@@ -149,6 +149,40 @@ For full functionality:
 pip install numpy rasterio shapely scipy fiona
 ```
 
+## Quick Start Example
+
+```python
+# Basic acoustic simulation
+from acoustic_sim.approx_acoustic_simulator import ApproxAcousticSimulator
+
+# Create simulator
+simulator = ApproxAcousticSimulator()
+
+# Define simple scene
+source_pos = (0.0, 0.0)
+ear_positions = [(-0.01, 0.0), (0.01, 0.0)]  # Left, right ears
+wall_segments = [((1.0, -0.5), (1.0, 0.5))]  # Vertical wall
+
+# Run simulation
+result = simulator.simulate(
+    source_pos=source_pos,
+    source_angle=0.0,
+    ear_positions=ear_positions,
+    scene_segments=wall_segments
+)
+
+print(f"ITD: {result.itd_seconds*1e6:.1f} μs")
+print(f"ILD: {result.ild_db:.2f} dB")
+
+# Integrate with LidarBat
+from environments.lidar_bat import LidarBat
+
+bat = LidarBat(0.0, 1.0, 1.0, 5.0, 0.005, echo_simulator=simulator)
+observation = bat.emit_pulse(0.0, [])  # Acoustic simulation runs automatically
+```
+
+See `acoustic_sim/demo.py` for a complete demonstration.
+
 ## Design Principles
 
 1. **Optional**: Does not affect existing functionality when not used

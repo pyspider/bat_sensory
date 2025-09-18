@@ -47,7 +47,7 @@ def import_optional_dependencies():
     return np, welch, fiona, shape, Point, LineString
 
 
-def load_routes(route_path: str) -> List[LineString]:
+def load_routes(route_path: str) -> List:
     """
     Load route LineStrings from GeoJSON or Shapefile.
     
@@ -96,7 +96,7 @@ def load_routes(route_path: str) -> List[LineString]:
     return routes
 
 
-def sample_points_along_route(route: LineString, spacing: float) -> List[Tuple[float, float]]:
+def sample_points_along_route(route, spacing: float) -> List[Tuple[float, float]]:
     """
     Sample points along a route at specified spacing.
     
