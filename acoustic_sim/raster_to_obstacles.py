@@ -19,6 +19,11 @@ except ImportError:
     RASTER_DEPS_AVAILABLE = False
     warnings.warn("Raster processing dependencies not available. "
                  "Install rasterio, fiona, and shapely to use raster_to_obstacles.")
+    
+    # Define dummy classes for type hints when dependencies unavailable
+    class LineString: pass
+    class Polygon: pass
+    class MultiPolygon: pass
 
 
 def read_raster_as_binary(raster_path: str, threshold: float = 0.5, 

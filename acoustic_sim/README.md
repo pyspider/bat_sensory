@@ -88,7 +88,7 @@ if echo_result:
 ### Integration with LidarBat
 
 ```python
-from environments.lidar_bat import LidarBat
+from environments.lidar_bat import LidarBat, Segment, Point
 from acoustic_sim.approx_acoustic_simulator import ApproxAcousticSimulator
 
 # Create acoustic simulator
@@ -104,7 +104,17 @@ bat = LidarBat(
     echo_simulator=echo_simulator  # Enable binaural simulation
 )
 
+# Create some obstacles
+obstacles = [Segment(Point(5, 0), Point(5, 10))]
+
 # When emit_pulse is called, it will use binaural simulation if available
+observation = bat.emit_pulse(0.0, obstacles)
+print(f"Binaural observation: {observation}")
+
+# For comparison, create a bat without echo simulator (original behavior)
+bat_original = LidarBat(0.0, 1.0, 1.0, 5.0, 0.01)
+observation_orig = bat_original.emit_pulse(0.0, obstacles)
+print(f"Original observation: {observation_orig}")
 ```
 
 ### Route Analysis
