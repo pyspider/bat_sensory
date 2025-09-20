@@ -1,0 +1,27 @@
+# WE-FDTD Test Cases List
+# Each line represents a simulation case with parameter overrides
+# Format: param1=value1,param2=value2,...
+# Lines starting with # are comments
+
+# Frequency sweep for bat echolocation analysis
+source_freq=40000.0,source_x=0.1,source_y=0.5
+source_freq=45000.0,source_x=0.1,source_y=0.5
+source_freq=50000.0,source_x=0.1,source_y=0.5
+source_freq=55000.0,source_x=0.1,source_y=0.5
+source_freq=60000.0,source_x=0.1,source_y=0.5
+
+# Position sweep for spatial analysis
+source_freq=50000.0,source_x=0.2,source_y=0.5
+source_freq=50000.0,source_x=0.3,source_y=0.5
+source_freq=50000.0,source_x=0.4,source_y=0.5
+source_freq=50000.0,source_x=0.5,source_y=0.5
+
+# Grid resolution study
+source_freq=50000.0,grid_points_x=100,grid_points_y=50
+source_freq=50000.0,grid_points_x=200,grid_points_y=100
+source_freq=50000.0,grid_points_x=300,grid_points_y=150
+
+# Time step sensitivity
+source_freq=50000.0,dt=1e-6,time_steps=1000
+source_freq=50000.0,dt=5e-7,time_steps=2000
+source_freq=50000.0,dt=2e-7,time_steps=5000
