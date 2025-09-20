@@ -1,0 +1,4 @@
+# FDTD integration artifacts
+outputs/
+fdtd_cases_*/
+fdtd_cases_demo/

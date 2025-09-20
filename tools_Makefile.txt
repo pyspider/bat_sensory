@@ -1,0 +1,22 @@
+# tools/Makefile
+NVCC ?= nvcc
+MPI_INC ?= /usr/include/mpi
+MPI_LIB ?= /usr/lib
+ARCH ?= sm_52
+NVCC_FLAGS ?= -O3 -arch=$(ARCH) -Xcompiler -fopenmp
+LDFLAGS ?= -L$(MPI_LIB) -lmpi -lm
+
+TARGET := WE-FDTD
+
+.PHONY: all clean
+
+all: $(TARGET)
+
+$(TARGET):
+	@echo "Compiling $(TARGET) with $(NVCC)..."
+	$(NVCC) ../WE-FDTD.cu -I $(MPI_INC) $(NVCC_FLAGS) $(LDFLAGS) -o $(TARGET)
+	@echo "Built $(TARGET) in $(shell pwd)"
+
+clean:
+	@rm -f $(TARGET)
+	@echo "cleaned"
