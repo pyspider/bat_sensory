@@ -1,297 +1,196 @@
-#!/usr/bin/env python3
 """
-WE-FDTD Runner Helper
+FDTD (Finite-Difference Time-Domain) Runner for WE-FDTD Integration
 
-Python helper to write input.dat, run WE-FDTD (subprocess/mpirun), parse wave CSV, and demo.
-This module provides a lightweight integration layer for running WE-FDTD CUDA simulations
-from Python without embedding CUDA code into the repository.
+This module provides integration with WE-FDTD for acoustic wave simulation
+in bat echolocation analysis.
 """
 
-import os
-import subprocess
-import sys
-import csv
+import logging
 import numpy as np
-from pathlib import Path
+import subprocess
 import tempfile
-import shutil
-import argparse
+import os
+from typing import Tuple, Optional, Dict, Any
+
+logger = logging.getLogger(__name__)
 
 
-class FDTDRunner:
+class FDTDResult:
+    """Container for FDTD simulation results"""
+    def __init__(self, left_waveform=None, right_waveform=None, 
+                 left_energy=0.0, right_energy=0.0, 
+                 left_arrival_idx=0, right_arrival_idx=0,
+                 itd_seconds=0.0, ild_db=0.0):
+        self.left_waveform = left_waveform if left_waveform is not None else np.array([])
+        self.right_waveform = right_waveform if right_waveform is not None else np.array([])
+        self.left_energy = left_energy
+        self.right_energy = right_energy
+        self.left_arrival_idx = left_arrival_idx
+        self.right_arrival_idx = right_arrival_idx
+        self.itd_seconds = itd_seconds
+        self.ild_db = ild_db
+
+
+def run_and_get_wave(point: Tuple[float, float], angle: float, 
+                     receiver_positions: Dict[str, Tuple[float, float]],
+                     obstacle_segments: list,
+                     dl: float = 0.01,
+                     Nx: int = 256,
+                     Ny: int = 256,
+                     Ngpu: int = 1,
+                     GpuId: int = 0,
+                     support_dir: Optional[str] = None,
+                     scratch_base: Optional[str] = None,
+                     mpirun_np: int = 1,
+                     timeout: int = 300) -> Optional[FDTDResult]:
     """
-    Helper class to interface with WE-FDTD CUDA simulator.
+    Run WE-FDTD simulation and return acoustic wave results
     
-    This class provides methods to:
-    - Generate input.dat files for WE-FDTD
-    - Execute WE-FDTD via subprocess (with optional MPI support)
-    - Parse receiver waveform CSV outputs
-    - Manage simulation directories and cleanup
+    Args:
+        point: Source position (x, y)
+        angle: Emission angle in radians
+        receiver_positions: Dict with 'left' and 'right' receiver positions
+        obstacle_segments: List of obstacle segments for the environment
+        dl: Grid spacing parameter
+        Nx, Ny: Grid dimensions
+        Ngpu: Number of GPUs to use
+        GpuId: GPU ID for single GPU runs
+        support_dir: Directory for support files
+        scratch_base: Base directory for scratch files
+        mpirun_np: Number of MPI processes
+        timeout: Timeout in seconds
+        
+    Returns:
+        FDTDResult object with simulation results, or None if failed
     """
-    
-    def __init__(self, fdtd_binary_path=None, work_dir=None, use_mpi=False, mpi_ranks=1):
-        """
-        Initialize FDTD runner.
+    try:
+        logger.info(f"Starting FDTD simulation at point {point}, angle {angle}")
         
-        Args:
-            fdtd_binary_path (str): Path to WE-FDTD executable
-            work_dir (str): Working directory for simulations (default: temp dir)
-            use_mpi (bool): Whether to use MPI for execution
-            mpi_ranks (int): Number of MPI ranks if using MPI
-        """
-        self.fdtd_binary_path = fdtd_binary_path or "we-fdtd"
-        self.work_dir = Path(work_dir) if work_dir else Path(tempfile.mkdtemp())
-        self.use_mpi = use_mpi
-        self.mpi_ranks = mpi_ranks
-        self.simulation_results = {}
-        
-    def write_input_dat(self, config, output_path=None):
-        """
-        Write input.dat file for WE-FDTD simulation.
-        
-        Args:
-            config (dict): Configuration parameters for the simulation
-            output_path (str): Path to write input.dat (default: work_dir/input.dat)
+        # Create temporary directory for simulation files
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # Create simulation configuration
+            config_file = os.path.join(temp_dir, "simulation.config")
+            _create_config_file(config_file, point, angle, receiver_positions, 
+                              obstacle_segments, dl, Nx, Ny)
             
-        Returns:
-            str: Path to the written input.dat file
-        """
-        if output_path is None:
-            output_path = self.work_dir / "input.dat"
-        
-        output_path = Path(output_path)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        # Default configuration parameters
-        default_config = {
-            'domain_size_x': 1.0,
-            'domain_size_y': 1.0,
-            'domain_size_z': 1.0,
-            'grid_points_x': 100,
-            'grid_points_y': 100,
-            'grid_points_z': 100,
-            'time_steps': 1000,
-            'dt': 1e-6,
-            'source_freq': 40000.0,
-            'source_x': 0.5,
-            'source_y': 0.5,
-            'source_z': 0.5,
-            'receivers': [(0.7, 0.5, 0.5), (0.3, 0.5, 0.5)],
-            'boundary_conditions': 'absorbing',
-        }
-        
-        # Merge with provided config
-        full_config = {**default_config, **config}
-        
-        with open(output_path, 'w') as f:
-            f.write(f"# WE-FDTD Input Configuration\n")
-            f.write(f"# Generated by bat_sensory FDTD integration\n\n")
+            # Prepare WE-FDTD command
+            cmd = _build_wefdtd_command(config_file, temp_dir, Ngpu, GpuId, 
+                                      support_dir, scratch_base, mpirun_np)
             
-            # Domain parameters
-            f.write(f"DOMAIN_SIZE {full_config['domain_size_x']} {full_config['domain_size_y']} {full_config['domain_size_z']}\n")
-            f.write(f"GRID_POINTS {full_config['grid_points_x']} {full_config['grid_points_y']} {full_config['grid_points_z']}\n")
-            f.write(f"TIME_STEPS {full_config['time_steps']}\n")
-            f.write(f"DT {full_config['dt']}\n")
+            # Run WE-FDTD simulation
+            logger.debug(f"Running WE-FDTD command: {' '.join(cmd)}")
+            result = subprocess.run(cmd, cwd=temp_dir, timeout=timeout,
+                                  capture_output=True, text=True)
             
-            # Source parameters
-            f.write(f"SOURCE_FREQ {full_config['source_freq']}\n")
-            f.write(f"SOURCE_POS {full_config['source_x']} {full_config['source_y']} {full_config['source_z']}\n")
+            if result.returncode != 0:
+                logger.warning(f"WE-FDTD simulation failed: {result.stderr}")
+                return None
             
-            # Receivers
-            f.write(f"NUM_RECEIVERS {len(full_config['receivers'])}\n")
-            for i, (x, y, z) in enumerate(full_config['receivers']):
-                f.write(f"RECEIVER_{i} {x} {y} {z}\n")
+            # Parse results
+            return _parse_fdtd_results(temp_dir, receiver_positions)
             
-            # Boundary conditions
-            f.write(f"BOUNDARY {full_config['boundary_conditions']}\n")
+    except subprocess.TimeoutExpired:
+        logger.error(f"FDTD simulation timed out after {timeout} seconds")
+        return None
+    except Exception as e:
+        logger.error(f"FDTD simulation failed with error: {e}")
+        return None
+
+
+def _create_config_file(config_file: str, point: Tuple[float, float], angle: float,
+                       receiver_positions: Dict[str, Tuple[float, float]],
+                       obstacle_segments: list, dl: float, Nx: int, Ny: int):
+    """Create WE-FDTD configuration file"""
+    with open(config_file, 'w') as f:
+        f.write(f"# WE-FDTD Configuration\n")
+        f.write(f"source_x={point[0]}\n")
+        f.write(f"source_y={point[1]}\n")
+        f.write(f"source_angle={angle}\n")
+        f.write(f"left_receiver_x={receiver_positions['left'][0]}\n")
+        f.write(f"left_receiver_y={receiver_positions['left'][1]}\n")
+        f.write(f"right_receiver_x={receiver_positions['right'][0]}\n")
+        f.write(f"right_receiver_y={receiver_positions['right'][1]}\n")
+        f.write(f"dl={dl}\n")
+        f.write(f"Nx={Nx}\n")
+        f.write(f"Ny={Ny}\n")
         
-        return str(output_path)
-    
-    def run_fdtd_simulation(self, input_dat_path, output_dir=None):
-        """
-        Execute WE-FDTD simulation.
-        
-        Args:
-            input_dat_path (str): Path to input.dat file
-            output_dir (str): Directory for simulation outputs
-            
-        Returns:
-            dict: Simulation results with return code and output paths
-        """
-        if output_dir is None:
-            output_dir = self.work_dir / "output"
-        
-        output_dir = Path(output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Prepare command
-        if self.use_mpi:
-            cmd = ["mpirun", "-np", str(self.mpi_ranks), self.fdtd_binary_path]
-        else:
-            cmd = [self.fdtd_binary_path]
-        
-        cmd.extend(["-i", str(input_dat_path), "-o", str(output_dir)])
-        
-        # Execute simulation
-        try:
-            result = subprocess.run(
-                cmd,
-                cwd=str(self.work_dir),
-                capture_output=True,
-                text=True,
-                timeout=300  # 5 minute timeout
-            )
-            
-            simulation_results = {
-                'return_code': result.returncode,
-                'stdout': result.stdout,
-                'stderr': result.stderr,
-                'output_dir': str(output_dir),
-                'success': result.returncode == 0
-            }
-            
-            if result.returncode == 0:
-                # Look for output files
-                wave_files = list(output_dir.glob("*.csv"))
-                simulation_results['wave_files'] = [str(f) for f in wave_files]
-            
-            return simulation_results
-            
-        except subprocess.TimeoutExpired:
-            return {
-                'return_code': -1,
-                'stdout': '',
-                'stderr': 'Simulation timed out after 300 seconds',
-                'success': False
-            }
-        except FileNotFoundError:
-            return {
-                'return_code': -1,
-                'stdout': '',
-                'stderr': f'FDTD binary not found: {self.fdtd_binary_path}',
-                'success': False
-            }
-    
-    def parse_wave_csv(self, csv_path):
-        """
-        Parse receiver waveform CSV file.
-        
-        Args:
-            csv_path (str): Path to CSV file with waveform data
-            
-        Returns:
-            dict: Parsed waveform data with time and amplitude arrays
-        """
-        try:
-            data = np.loadtxt(csv_path, delimiter=',', skiprows=1)
-            
-            if data.ndim == 1:
-                # Single receiver
-                time = data[:, 0] if data.shape[1] > 1 else np.arange(len(data))
-                amplitude = data[:, 1] if data.shape[1] > 1 else data
-                return {
-                    'time': time,
-                    'amplitude': amplitude,
-                    'receivers': 1
-                }
+        # Write obstacle information
+        f.write(f"num_obstacles={len(obstacle_segments)}\n")
+        for i, segment in enumerate(obstacle_segments):
+            if hasattr(segment, 'unpack'):
+                x0, y0, x1, y1 = segment.unpack()
             else:
-                # Multiple receivers
-                time = data[:, 0]
-                receivers = {}
-                for i in range(1, data.shape[1]):
-                    receivers[f'receiver_{i-1}'] = data[:, i]
-                
-                return {
-                    'time': time,
-                    'receivers': receivers,
-                    'num_receivers': data.shape[1] - 1
-                }
-                
-        except Exception as e:
-            print(f"Error parsing CSV {csv_path}: {e}")
-            return None
-    
-    def cleanup(self):
-        """Clean up temporary working directory."""
-        if self.work_dir.exists() and tempfile.gettempdir() in str(self.work_dir):
-            shutil.rmtree(self.work_dir)
+                x0, y0, x1, y1 = segment
+            f.write(f"obstacle_{i}={x0},{y0},{x1},{y1}\n")
 
 
-def demo_fdtd_simulation():
-    """
-    Demonstration of WE-FDTD integration.
+def _build_wefdtd_command(config_file: str, temp_dir: str, Ngpu: int, GpuId: int,
+                         support_dir: Optional[str], scratch_base: Optional[str],
+                         mpirun_np: int) -> list:
+    """Build WE-FDTD command line"""
+    cmd = []
     
-    This function shows how to:
-    1. Configure simulation parameters
-    2. Write input.dat file
-    3. Run FDTD simulation
-    4. Parse results
-    """
-    print("WE-FDTD Integration Demo")
-    print("=" * 40)
+    if mpirun_np > 1:
+        cmd.extend(["mpirun", "-np", str(mpirun_np)])
     
-    # Create runner instance
-    runner = FDTDRunner(work_dir="./fdtd_demo_run")
+    cmd.extend(["we-fdtd", "--config", config_file])
     
-    # Define simulation configuration
-    config = {
-        'domain_size_x': 2.0,
-        'domain_size_y': 1.0,
-        'domain_size_z': 1.0,
-        'grid_points_x': 200,
-        'grid_points_y': 100,
-        'grid_points_z': 100,
-        'time_steps': 2000,
-        'dt': 5e-7,
-        'source_freq': 50000.0,  # 50 kHz bat call
-        'source_x': 0.1,
-        'source_y': 0.5,
-        'source_z': 0.5,
-        'receivers': [
-            (1.9, 0.5, 0.5),  # Far receiver
-            (0.5, 0.5, 0.5),  # Mid receiver
-        ]
-    }
+    if Ngpu > 1:
+        cmd.extend(["--ngpu", str(Ngpu)])
+    else:
+        cmd.extend(["--gpu-id", str(GpuId)])
     
-    print("1. Writing input.dat file...")
-    input_file = runner.write_input_dat(config)
-    print(f"   Input file written to: {input_file}")
+    if support_dir:
+        cmd.extend(["--support-dir", support_dir])
     
-    print("2. Running FDTD simulation...")
-    results = runner.run_fdtd_simulation(input_file)
+    if scratch_base:
+        cmd.extend(["--scratch-base", scratch_base])
     
-    if results['success']:
-        print("   Simulation completed successfully!")
-        print(f"   Output directory: {results['output_dir']}")
+    cmd.extend(["--output-dir", temp_dir])
+    
+    return cmd
+
+
+def _parse_fdtd_results(temp_dir: str, receiver_positions: Dict[str, Tuple[float, float]]) -> Optional[FDTDResult]:
+    """Parse WE-FDTD output files and create result object"""
+    try:
+        # Look for output files
+        left_wave_file = os.path.join(temp_dir, "left_receiver_waveform.dat")
+        right_wave_file = os.path.join(temp_dir, "right_receiver_waveform.dat")
         
-        if 'wave_files' in results:
-            print("3. Parsing waveform data...")
-            for wave_file in results['wave_files']:
-                wave_data = runner.parse_wave_csv(wave_file)
-                if wave_data:
-                    print(f"   Parsed {wave_file}: {len(wave_data['time'])} time steps")
-    else:
-        print(f"   Simulation failed: {results['stderr']}")
-    
-    print("\nDemo completed. Check ./fdtd_demo_run for outputs.")
-    return results
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="WE-FDTD Runner Helper")
-    parser.add_argument("--demo", action="store_true", help="Run demonstration")
-    parser.add_argument("--fdtd-binary", help="Path to WE-FDTD binary")
-    parser.add_argument("--work-dir", help="Working directory for simulations")
-    parser.add_argument("--use-mpi", action="store_true", help="Use MPI for execution")
-    parser.add_argument("--mpi-ranks", type=int, default=1, help="Number of MPI ranks")
-    
-    args = parser.parse_args()
-    
-    if args.demo:
-        demo_fdtd_simulation()
-    else:
-        print("Use --demo to run demonstration, or import this module in your Python code.")
-        print("Example usage:")
-        print("  from tools.fdtd_runner import FDTDRunner")
-        print("  runner = FDTDRunner()")
-        print("  results = runner.run_fdtd_simulation('input.dat')")
+        # Default result in case files don't exist
+        result = FDTDResult()
+        
+        # Load waveforms if files exist
+        if os.path.exists(left_wave_file):
+            result.left_waveform = np.loadtxt(left_wave_file)
+            result.left_energy = np.sum(result.left_waveform ** 2)
+            # Find first significant arrival (simple threshold detection)
+            threshold = 0.1 * np.max(np.abs(result.left_waveform))
+            arrivals = np.where(np.abs(result.left_waveform) > threshold)[0]
+            result.left_arrival_idx = arrivals[0] if len(arrivals) > 0 else 0
+        
+        if os.path.exists(right_wave_file):
+            result.right_waveform = np.loadtxt(right_wave_file)
+            result.right_energy = np.sum(result.right_waveform ** 2)
+            # Find first significant arrival
+            threshold = 0.1 * np.max(np.abs(result.right_waveform))
+            arrivals = np.where(np.abs(result.right_waveform) > threshold)[0]
+            result.right_arrival_idx = arrivals[0] if len(arrivals) > 0 else 0
+        
+        # Calculate ITD (Inter-aural Time Difference) and ILD (Inter-aural Level Difference)
+        if len(result.left_waveform) > 0 and len(result.right_waveform) > 0:
+            # Assume sampling rate of 44.1 kHz for time conversion
+            dt = 1.0 / 44100.0
+            result.itd_seconds = (result.right_arrival_idx - result.left_arrival_idx) * dt
+            
+            # ILD in dB
+            if result.left_energy > 0 and result.right_energy > 0:
+                result.ild_db = 10 * np.log10(result.right_energy / result.left_energy)
+            
+        logger.info(f"FDTD simulation completed successfully. ITD: {result.itd_seconds:.6f}s, ILD: {result.ild_db:.2f}dB")
+        return result
+        
+    except Exception as e:
+        logger.error(f"Failed to parse FDTD results: {e}")
+        return None
