@@ -66,7 +66,7 @@ def rotation_direction(v0, v1):
     return 1 if outer >= 0 else -1
 
 class LidarBat(object):
-    def __init__(self, init_angle, init_x, init_y, init_speed, dt):
+    def __init__(self, init_angle, init_x, init_y, init_speed, dt, echo_simulator=None):
         self.angle = init_angle
         self.x = init_x  # [m]
         self.y = init_y  # [m]
@@ -87,9 +87,57 @@ class LidarBat(object):
         self.lidar_right_angle = -(math.pi / 6) / 2
         self.lidar_range = np.array([
             self.lidar_left_angle, self.lidar_right_angle])  # [rad]
+        
+        # Optional acoustic echo simulator
+        self.echo_simulator = echo_simulator
+        self.ear_offset = 0.02  # Default ear offset for binaural simulation
     
 
     def emit_pulse(self, lidar_angle, obstacle_segments):
+        # Try acoustic echo simulator first if available
+        if self.echo_simulator is not None:
+            # Build left and right ear positions
+            left_angle = self.angle + math.pi / 2
+            right_angle = self.angle - math.pi / 2
+            left_ear = (self.x + self.ear_offset * math.cos(left_angle), 
+                       self.y + self.ear_offset * math.sin(left_angle))
+            right_ear = (self.x + self.ear_offset * math.cos(right_angle), 
+                        self.y + self.ear_offset * math.sin(right_angle))
+            
+            # Global source angle (bat angle + lidar angle)
+            global_source_angle = self.angle + lidar_angle
+            
+            # Simulate binaural echo
+            echo_result = self.echo_simulator.simulate(
+                source_pos=(self.x, self.y),
+                source_angle=global_source_angle,
+                receivers=[left_ear, right_ear],
+                source_waveform=None,
+                scene_segments=obstacle_segments
+            )
+            
+            if echo_result is not None and (echo_result.left_first_sample is not None or echo_result.right_first_sample is not None):
+                # Convert echo result to observation format
+                # Compute mean arrival time for distance estimate
+                if echo_result.left_first_sample is not None and echo_result.right_first_sample is not None:
+                    mean_delay_samples = (echo_result.left_first_sample + echo_result.right_first_sample) / 2.0
+                elif echo_result.left_first_sample is not None:
+                    mean_delay_samples = echo_result.left_first_sample
+                else:
+                    mean_delay_samples = echo_result.right_first_sample
+                
+                # Convert delay to distance
+                delay_time = mean_delay_samples / self.echo_simulator.sample_rate
+                distance = delay_time * self.echo_simulator.speed_of_sound
+                normalized_distance = min(distance / self.lidar_length, 1.0)
+                
+                # Create conservative observation compatible with original format
+                # Use a simple fallback: [0, normalized_distance] to avoid breaking existing code
+                observation = np.array([0.0, normalized_distance])
+                self._update_state(observation)
+                return observation
+        
+        # Fallback to original geometric method
         lidar_vec = cos_sin(lidar_angle) * self.lidar_length
         left_lidar_seg, right_lidar_seg = self._lidar_segments(lidar_vec)
         left_lidar_vec = left_lidar_seg.p1.unpack() - left_lidar_seg.p0.unpack()
