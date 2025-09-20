@@ -109,5 +109,13 @@ dmypy.json
 data/*
 .vscode
 
+# WE-FDTD Integration outputs
+outputs/
+fdtd_cases*
+tools/bin/
+tools/build/
+tools/src/
+tools/*.log
+fdtd_demo_run/
 
 # End of https://www.gitignore.io/api/python
